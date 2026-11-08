@@ -1,7 +1,7 @@
 // Offline-Unterstützung mit „ganzen“ Updates:
 // Eine neue Version wird beim Installieren komplett heruntergeladen (am Browser-Cache vorbei)
 // und erst dann aktiviert. So können nie Dateien aus verschiedenen Versionen gemischt werden.
-const VERSION = 'bibelstudium-v30';
+const VERSION = 'bibelstudium-v31';
 const DATA_CACHE = 'bibelstudium-daten'; // Bibeltexte, Querverweise, PDF-Leser – ändern sich nie
 const SHELL = [
   './',

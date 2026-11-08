@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '30 · 08.11.2026';
+export const APP_VERSION = '31 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -644,9 +644,11 @@ function bindSettings() {
     try {
       const res = await importBibleFile(file, {
         signal,
-        onProgress: ({ page, pages, book }) => {
-          $('#import-bar').style.width = `${Math.round((page / pages) * 100)}%`;
-          $('#import-status').textContent = `Seite ${page} von ${pages}${book ? ` · ${getBook(book).name}` : ''}`;
+        onProgress: ({ page, pages, book, phase }) => {
+          const pct = phase === 1 ? (page / pages) * 35 : phase === 2 ? 35 + (page / pages) * 65 : (page / pages) * 100;
+          $('#import-bar').style.width = `${Math.round(pct)}%`;
+          const step = phase === 1 ? 'Schritt 1 von 2 · Buchanfänge suchen' : phase === 2 ? 'Schritt 2 von 2 · Text einlesen' : '';
+          $('#import-status').textContent = `${step ? step + ' · ' : ''}Seite ${page} von ${pages}${book ? ` · ${getBook(book).name}` : ''}`;
         },
         name: (suggested) => prompt('Wie soll die Übersetzung heißen?', suggested) || suggested,
       });

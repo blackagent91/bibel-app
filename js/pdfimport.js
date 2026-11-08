@@ -168,7 +168,16 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   let pendingRefs = [];
   const notes = { unmatched: [], skipped: [], fallbacks: [], starts: [] }; // für den Prüfbericht
   const sizeChars = new Map(); // Schriftgröße -> Anzahl Zeichen (ganzes Dokument)
-  let sizeTotal = 0;
+  let bodyGlobal = 0; // normale Schriftgröße des ganzen Dokuments (nach Durchgang 1)
+  const titlePages = []; // [{page, id}] – wo welches Buch laut Titel beginnt (Durchgang 1)
+  /**
+   * Darf der Import das laufende Buch verlassen (weil es „voll“ ist)? Nein, wenn der Titel des
+   * nächsten Buches erst später im PDF kommt – dann war ein Kapitelwechsel zu viel gezählt.
+   */
+  const mayLeaveBook = () => {
+    const next = titlePages.find((t) => t.page > pageNo && t.id > st.book);
+    return !(next && next.id === st.book + 1);
+  };
   let pageNo = 0;
   const st = {
     book: 0,
@@ -224,7 +233,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     st.buf = oldPart;
     flush();
     st.buf = '';
-    if (st.chapter + 1 > maxChapters(st.book) && st.book < 66) {
+    if (st.chapter + 1 > maxChapters(st.book) && st.book < 66 && mayLeaveBook()) {
       // Buch ist voll -> das ist der Anfang des nächsten Buches (Titel war nicht lesbar)
       const next = st.book + 1;
       notes.fallbacks.push(`Seite ${pageNo}: „${BOOKS[st.book - 1].name}“ hat alle Kapitel → weiter mit „${BOOKS[next - 1].name}“`);
@@ -275,17 +284,39 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     attachRefs();
   };
 
-  for (let pn = 1; pn <= pdf.numPages; pn++) {
-    if (signal.cancelled) throw new Error('Import abgebrochen.');
+  const readPage = async (pn) => {
     const page = await pdf.getPage(pn);
     const vp = page.getViewport({ scale: 1 });
     const tc = await page.getTextContent();
     page.cleanup();
-    pageNo = pn;
-    processPage(tc.items, vp.width);
-    if (pn % 5 === 0 || pn === pdf.numPages) {
-      onProgress({ page: pn, pages: pdf.numPages, book: st.book });
+    return { items: tc.items, width: vp.width };
+  };
+
+  // Durchgang 1: Schriftgrößen des ganzen Dokuments sammeln und Buchtitel-Seiten finden
+  for (let pn = 1; pn <= pdf.numPages; pn++) {
+    if (signal.cancelled) throw new Error('Import abgebrochen.');
+    const { items, width } = await readPage(pn);
+    const a = analyze(items, width, 1);
+    if (a?.titleId) {
+      const last = titlePages[titlePages.length - 1];
+      if (!last || last.id !== a.titleId) titlePages.push({ page: pn, id: a.titleId });
+    }
+    if (pn % 10 === 0 || pn === pdf.numPages) {
+      onProgress({ page: pn, pages: pdf.numPages, phase: 1, book: a?.titleId || 0 });
       await new Promise((r) => setTimeout(r, 0)); // Oberfläche reagieren lassen
+    }
+  }
+  bodyGlobal = weightedMode([...sizeChars]);
+
+  // Durchgang 2: Text einlesen – die Buchgrenzen sind jetzt bekannt
+  for (let pn = 1; pn <= pdf.numPages; pn++) {
+    if (signal.cancelled) throw new Error('Import abgebrochen.');
+    const { items, width } = await readPage(pn);
+    pageNo = pn;
+    processPage(items, width);
+    if (pn % 5 === 0 || pn === pdf.numPages) {
+      onProgress({ page: pn, pages: pdf.numPages, phase: 2, book: st.book });
+      await new Promise((r) => setTimeout(r, 0));
     }
   }
   flush();
@@ -328,7 +359,8 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   };
 
   // -------------------------------------------------------------------------
-  function processPage(rawItems, pageWidth) {
+  /** Textstücke einer Seite einordnen: Fließtext, Kapitelzahlen, Buchtitel */
+  function analyze(rawItems, pageWidth, pass) {
     const items = [];
     for (const it of rawItems) {
       if (!it.str) continue;
@@ -337,16 +369,13 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       items.push({ s: fixLigatures(it.str), x: t[4], y: t[5], w: it.width, size, font: it.fontName });
     }
     const textItems = items.filter((i) => i.s.trim());
-    if (!textItems.length) return;
+    if (!textItems.length) return null;
 
-    // Normale Schriftgröße über das ganze Dokument bestimmen (eine Seite mit wenig Bibeltext und
-    // langer Fußnote würde sonst die Fußnotenschrift für den Fließtext halten)
+    // Normale Schriftgröße: in Durchgang 1 sammeln, in Durchgang 2 die des ganzen Dokuments
+    // (eine Seite mit wenig Bibeltext und langer Fußnote würde sonst die Fußnotenschrift für Fließtext halten)
     const pageSizes = textItems.map((i) => [Math.round(i.size * 2) / 2, i.s.length]);
-    for (const [k, w] of pageSizes) {
-      sizeChars.set(k, (sizeChars.get(k) || 0) + w);
-      sizeTotal += w;
-    }
-    const body = sizeTotal > 4000 ? weightedMode([...sizeChars]) : weightedMode(pageSizes);
+    if (pass === 1) for (const [k, w] of pageSizes) sizeChars.set(k, (sizeChars.get(k) || 0) + w);
+    const body = pass === 2 && bodyGlobal ? bodyGlobal : weightedMode(pageSizes);
     const bodyFont = weightedMode(
       textItems.filter((i) => Math.abs(i.size - body) < 0.6).map((i) => [i.font, i.s.length])
     );
@@ -372,6 +401,20 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       }
     }
 
+    let titleId = 0;
+    let titleTop = -Infinity;
+    if (titles.length) {
+      titleId = matchBookTitle(joinText(titles));
+      titleTop = Math.max(...titles.map((i) => i.y + i.size));
+    }
+    return { body, bodyFont, titles, drops, normal, titleId, titleTop };
+  }
+
+  function processPage(rawItems, pageWidth) {
+    const a = analyze(rawItems, pageWidth, 2);
+    if (!a) return;
+    const { body, bodyFont, titles, drops, normal, titleId, titleTop } = a;
+
     // Kopfzeile (Seitenzahl + Buch + Kapitel) oben entfernen
     const sorted = normal.filter((i) => i.s.trim()).sort((a, b) => b.y - a.y);
     if (sorted.length) {
@@ -388,12 +431,6 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
 
     // Buchtitel (kann über mehrere Zeilen gehen). Text oberhalb des Titels gehört noch
     // zum vorigen Buch, Text darunter zum neuen.
-    let titleId = 0;
-    let titleTop = -Infinity;
-    if (titles.length) {
-      titleId = matchBookTitle(joinText(titles));
-      titleTop = Math.max(...titles.map((i) => i.y + i.size));
-    }
     if (titleId && titleId !== st.book) {
       if (titleId < st.book) {
         notes.fallbacks.push(`Seite ${pageNo}: Titel „${BOOKS[titleId - 1].name}“ nach „${BOOKS[st.book - 1].name}“ gefunden – Zuordnung korrigiert`);
@@ -481,7 +518,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       if (st.verse <= 1) startChapter(1, 1);
       return;
     }
-    if (n === 1 && st.book < 66 && st.chapter > 1) {
+    if (n === 1 && st.book < 66 && st.chapter > 1 && mayLeaveBook()) {
       // „1“ nach mehreren Kapiteln: neues Buch, dessen Titel nicht lesbar war
       const next = st.book + 1;
       notes.fallbacks.push(`Seite ${pageNo}: Buchanfang ohne erkannten Titel → als „${BOOKS[next - 1].name}“ eingeordnet`);
@@ -591,7 +628,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
           s = m[2];
         } else if (
           !plausible && st.chapter && marked && st.verse >= 3 &&
-          (n === 1 || (n === 2 && st.book !== 19)) && /^[A-ZÄÖÜ»„"(]/.test(m[2] || 'X')
+          (n === 1 || (n === 2 && st.book !== 19))
         ) {
           if (chapterReset(n)) s = m[2];
         }
