@@ -81,7 +81,11 @@ Bibel bleibt nur auf deinem Gerät und wird nirgends hochgeladen.
 
 Beim **PDF-Import** erkennt die App Buchtitel, Kapitelanfänge (große Zahl bzw. „Psalm N“)
 und Versnummern. Kopfzeilen, Zwischenüberschriften, Parallelstellen und Fußnoten werden
-übersprungen. Nach dem Import zeigt ein Prüfbericht, ob alle Bücher und Kapitel erkannt wurden.
+übersprungen. Als Vorlage dienen die Kapitel- und Verszahlen der eingebauten Elberfelder
+(`data/versecounts.json`): Ein Kapitelwechsel wird nur akzeptiert, wenn das Kapitel davor
+plausibel voll ist, und hat ein Buch alle Kapitel, beginnt das nächste – auch ohne lesbaren Titel.
+Nach dem Import zeigt ein Prüfbericht, ob alle Bücher und Kapitel erkannt wurden, und listet
+Kapitel mit deutlich abweichender Verszahl auf (antippen springt zur Stelle).
 Zum Auslesen dient [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0, im Ordner `vendor/pdfjs`).
 
 ## Daten & Sicherung

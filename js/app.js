@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '27 · 08.11.2026';
+export const APP_VERSION = '28 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -686,6 +686,15 @@ function bindSettings() {
         : `<p class="report-ok">✓ Alle Bücher und Kapitel wurden erkannt.</p>`;
       if (extra.length) html += `<p class="hint">Hinweise (für die Fehlersuche):</p><div class="report-list">${extra.map(esc).join('<br>')}</div>`;
       if (skipped.length) html += `<p class="hint">Übersprungen (Vorwort/Anhang, kein Bibeltext): ${skipped.length} Abschnitt${skipped.length > 1 ? 'e' : ''}</p>`;
+      if (r.deviations?.length) {
+        html += `<p class="hint">Abgleich mit der Vorlage – ${r.deviations.length} Kapitel mit deutlich anderer Verszahl. Tippe zum Prüfen (kleine Unterschiede in der Verszählung sind zwischen Übersetzungen normal):</p>
+          <div class="report-list">${r.deviations
+            .slice(0, 80)
+            .map((d) => `<button class="dev-item" data-dev="${d.book}:${d.chapter}">${esc(getBook(d.book).name)} ${d.chapter}: ${d.got} statt ${d.exp} Verse</button>`)
+            .join('')}${r.deviations.length > 80 ? '<br>…' : ''}</div>`;
+      } else if (r.books > 60) {
+        html += `<p class="report-ok">✓ Alle Kapitel passen zur Vorlage.</p>`;
+      }
       if (r.starts?.length) {
         html += `<details class="report-details"><summary>Gefundene Buchanfänge (${r.starts.length})</summary><div class="report-list">${r.starts.map(esc).join('<br>')}</div></details>`;
       }
@@ -696,6 +705,15 @@ function bindSettings() {
     html += `<div class="row-btns"><button class="btn primary" id="import-done">Fertig</button></div>`;
     box.innerHTML = html;
     $('#import-done').onclick = () => $('#import-modal').classList.add('hidden');
+    box.querySelectorAll('[data-dev]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          const [book, chapter] = b.dataset.dev.split(':').map(Number);
+          $('#import-modal').classList.add('hidden');
+          bible.goto({ book, chapter });
+          if (isNarrow()) showPane('bible');
+        })
+    );
   }
 
   $('#trans-list').addEventListener('click', async (e) => {

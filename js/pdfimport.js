@@ -136,6 +136,13 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   let meta = {};
   try { meta = (await pdf.getMetadata())?.info || {}; } catch {}
 
+  // Vorlage: Kapitel- und Verszahlen jedes Buches (aus der eingebauten Elberfelder).
+  // Damit werden Kapitel- und Buchwechsel geprüft – Übersetzungen weichen nur minimal ab.
+  let VC = null;
+  try { VC = await (await fetch('data/versecounts.json')).json(); } catch {}
+  const expVerses = (b, c) => VC?.[b - 1]?.[c - 1] || 0;
+  const maxChapters = (b) => (b === 29 ? 4 : BOOKS[b - 1].chapters); // Joel: 3 oder 4 Kapitel
+
   const books = [];
   const xrefs = {}; // "Buch:Kapitel:Vers" -> ["43.15.18-19", …] (Stellen unter den Zwischenüberschriften)
   let pendingRefs = [];
@@ -179,6 +186,9 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
    * die große Kapitelzahl im PDF nicht als Text lesbar war.
    */
   const chapterReset = (n) => {
+    const exp = expVerses(st.book, st.chapter);
+    const needed = exp ? Math.max(3, Math.floor(exp * 0.6)) : 3;
+    if (st.verse < needed) return false; // mitten im Kapitel -> kein Kapitelwechsel
     let oldPart = st.buf;
     let v1 = '';
     if (n === 2) {
@@ -193,6 +203,15 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     }
     st.buf = oldPart;
     flush();
+    st.buf = '';
+    if (st.chapter + 1 > maxChapters(st.book) && st.book < 66) {
+      // Buch ist voll -> das ist der Anfang des nächsten Buches (Titel war nicht lesbar)
+      const next = st.book + 1;
+      notes.fallbacks.push(`Seite ${pageNo}: „${BOOKS[st.book - 1].name}“ hat alle Kapitel → weiter mit „${BOOKS[next - 1].name}“`);
+      startBook(next, 'über die Kapitelzahl erkannt');
+      if (next === 19) return true; // Psalmen beginnen mit „Psalm 1“
+      st.chapter = 0;
+    }
     st.chapter += 1;
     st.verse = 1;
     st.buf = v1.replace(new RegExp('^' + st.chapter + '(?!\\d)\\s*'), ''); // evtl. mitgelesene Kapitelzahl entfernen
@@ -200,6 +219,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     st.provisional = false;
     notes.resets = (notes.resets || 0) + 1;
     setVerse(n);
+    return true;
   };
   const append = (text) => {
     if (!st.book || !st.chapter || st.verse < 1 || !text) return;
@@ -264,7 +284,23 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   }
   const xrefCount = Object.values(xrefs).reduce((n, l) => n + l.length, 0);
   if (notes.resets) notes.fallbacks.push(`${notes.resets} Kapitelanfänge über die Versnummern erkannt (die große Kapitelzahl war im PDF nicht lesbar)`);
-  return { name: guessName(meta, file.name), books: out, xrefs, report: { ...buildReport(out), ...notes, xrefs: xrefCount } };
+  const deviations = [];
+  if (VC) {
+    out.forEach((b, i) => {
+      if (!b) return;
+      b.forEach((c, ci) => {
+        const exp = VC[i][ci];
+        const got = (c || []).filter(Boolean).length;
+        if (exp && Math.abs(got - exp) > 2) deviations.push({ book: i + 1, chapter: ci + 1, got, exp });
+      });
+    });
+  }
+  return {
+    name: guessName(meta, file.name),
+    books: out,
+    xrefs,
+    report: { ...buildReport(out), ...notes, xrefs: xrefCount, deviations },
+  };
 
   // -------------------------------------------------------------------------
   function processPage(rawItems, pageWidth) {
@@ -525,8 +561,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
           !plausible && st.chapter && g.font !== bodyFont && st.verse >= 3 &&
           (n === 1 || (n === 2 && st.book !== 19))
         ) {
-          chapterReset(n);
-          s = m[2];
+          if (chapterReset(n)) s = m[2];
         }
       }
       first = false;
