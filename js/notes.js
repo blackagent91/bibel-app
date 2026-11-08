@@ -1929,7 +1929,7 @@ class Ink {
   drawStroke(ctx, s, from = 0) {
     const p = s.p;
     if (s.t === 'marker') {
-      ctx.strokeStyle = s.c;
+      ctx.strokeStyle = inkColor(s.c);
       ctx.lineWidth = s.w * 5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -1941,8 +1941,7 @@ class Ink {
       ctx.stroke();
       return;
     }
-    ctx.strokeStyle = s.c;
-    ctx.fillStyle = s.c;
+    ctx.strokeStyle = ctx.fillStyle = inkColor(s.c);
     if (p.length === 3) {
       ctx.beginPath();
       ctx.arc(p[0], p[1], (s.w * (0.5 + p[2])) / 2, 0, Math.PI * 2);
@@ -1975,6 +1974,11 @@ class Ink {
     }
     if (open) ctx.stroke();
   }
+}
+
+/** Weiße Stiftfarbe wird im hellen Modus dunkel gezeichnet (gespeichert bleibt die Farbe gleich) */
+function inkColor(c) {
+  return c === '#f2f2f2' && document.documentElement.dataset.theme === 'light' ? '#1c1b19' : c;
 }
 
 const BOXES = new WeakMap(); // Strich -> Begrenzungsrahmen (zwischengespeichert)

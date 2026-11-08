@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '48 · 08.11.2026';
+export const APP_VERSION = '49 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -537,6 +537,7 @@ function bindLayout() {
   $$('.focus-btn').forEach((b) => (b.onclick = () => setFocus(state.focus === b.dataset.focus ? null : b.dataset.focus)));
   $('#focus-switch').onclick = () => setFocus(state.focus === 'notes' ? 'bible' : 'notes');
   $('#focus-prev').onclick = () => stepNote(-1);
+  $$('.theme-btn').forEach((b) => (b.onclick = toggleTheme));
   $('#focus-next').onclick = () => stepNote(1);
   window.matchMedia('(max-width: 760px)').addEventListener?.('change', () => state.focus && setFocus(null));
 
@@ -650,6 +651,17 @@ function toggleSwap() {
   }, 120);
   saveSettings();
   toast(settings.swap === '1' ? 'Notizen rechts · Bibel links' : 'Notizen links · Bibel rechts', 1600);
+}
+
+/** Hell/Dunkel umschalten */
+function toggleTheme() {
+  const light = document.documentElement.dataset.theme !== 'light';
+  if (light) document.documentElement.dataset.theme = 'light';
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch {}
+  $('meta[name="theme-color"]').content = light ? '#fbfaf6' : '#000000';
+  editor.ink.schedule(); // Handschrift in passender Farbe neu zeichnen
+  toast(light ? 'Heller Modus' : 'Dunkler Modus', 1200);
 }
 
 function applySettings() {
