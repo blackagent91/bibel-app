@@ -565,3 +565,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .day-filter .chip.active em { opacity: .8; }
 .day-head { margin: 14px 8px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); font-weight: 600; }
 .day-head:first-child { margin-top: 2px; }
+
+/* Umschalter Tage / Bücher */
+.day-filter .seg { display: inline-flex; flex: none; background: var(--bg-2); border-radius: 15px; padding: 2px; margin-right: 2px; }
+.day-filter .seg button { border: 0; background: transparent; color: var(--text-3); height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600; }
+.day-filter .seg button.active { background: var(--bg-3); color: var(--text); }

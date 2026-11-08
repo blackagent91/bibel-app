@@ -15,6 +15,8 @@ const state = {
   current: null, // aktuell geöffnete Notiz
   drawerTab: 'notes',
   dayFilter: null, // "2026-11-08" oder null = alle Tage
+  bookFilter: null, // Buch-ID oder null = alle Bücher
+  filterMode: 'day', // welche Filterleiste gerade sichtbar ist
 };
 
 /** Tage, an denen an einer Notiz gearbeitet wurde */
@@ -22,7 +24,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '10 · 08.11.2026';
+export const APP_VERSION = '11 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -235,50 +237,91 @@ function closeDrawer() {
   drawer.setAttribute('aria-hidden', 'true');
 }
 
-function renderDayFilter() {
-  const counts = new Map();
-  if (state.drawerTab === 'notes') {
-    for (const n of state.notes.values()) for (const d of noteDays(n)) counts.set(d, (counts.get(d) || 0) + 1);
+/** Erste Bibelstelle einer Notiz in einem bestimmten Buch (für die Sortierung beim Buchfilter) */
+const firstRefIn = (n, book) => (n.refs || []).filter((r) => r.book === book).sort(compareRefs)[0];
+
+function renderFilters() {
+  const notesTab = state.drawerTab === 'notes';
+  // Zählen: Tage und Bücher (jeweils unter Berücksichtigung des anderen Filters)
+  const dayCounts = new Map();
+  const bookCounts = new Map();
+  const inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+  if (notesTab) {
+    for (const n of state.notes.values()) {
+      const books = new Set((n.refs || []).map((r) => r.book));
+      if (!state.bookFilter || books.has(state.bookFilter)) for (const d of noteDays(n)) inc(dayCounts, d);
+      if (!state.dayFilter || noteDays(n).includes(state.dayFilter)) for (const b of books) inc(bookCounts, b);
+    }
   } else {
-    for (const n of state.notes.values()) for (const r of n.refs || []) { const d = refDay(r, n); counts.set(d, (counts.get(d) || 0) + 1); }
-    for (const m of state.marks) { const d = refDay(m); counts.set(d, (counts.get(d) || 0) + 1); }
+    const all = [];
+    for (const n of state.notes.values()) for (const r of n.refs || []) all.push({ book: r.book, day: refDay(r, n) });
+    for (const m of state.marks) all.push({ book: m.book, day: refDay(m) });
+    for (const r of all) {
+      if (!state.bookFilter || r.book === state.bookFilter) inc(dayCounts, r.day);
+      if (!state.dayFilter || r.day === state.dayFilter) inc(bookCounts, r.book);
+    }
   }
-  const days = [...counts.keys()].sort().reverse();
+  const days = [...dayCounts.keys()].sort().reverse();
+  const books = [...bookCounts.keys()].sort((x, y) => x - y);
   const bar = $('#day-filter');
-  if (days.length < 2 && !state.dayFilter) {
+  if (days.length < 2 && !books.length && !state.dayFilter && !state.bookFilter) {
     bar.innerHTML = '';
     bar.classList.add('hidden');
     return;
   }
   bar.classList.remove('hidden');
-  const chip = (key, label, n) =>
-    `<button class="chip${state.dayFilter === key ? ' active' : ''}" data-day="${key || ''}">${esc(label)}${n != null ? ` <em>${n}</em>` : ''}</button>`;
-  bar.innerHTML = chip(null, 'Alle Tage') + days.map((d) => chip(d, dayLabel(d), counts.get(d))).join('');
+  const mode = state.filterMode;
+  const seg = `<div class="seg">
+      <button class="${mode === 'day' ? 'active' : ''}" data-mode="day">Tage</button>
+      <button class="${mode === 'book' ? 'active' : ''}" data-mode="book">Bücher</button>
+    </div>`;
+  const chip = (attr, key, active, label, n) =>
+    `<button class="chip${active ? ' active' : ''}" data-${attr}="${key ?? ''}">${esc(label)}${n != null ? ` <em>${n}</em>` : ''}</button>`;
+  // aktiver Filter der anderen Art als entfernbares Kärtchen
+  let other = '';
+  if (mode === 'book' && state.dayFilter) other = `<button class="chip active" data-clear="day">${esc(dayLabel(state.dayFilter))} ✕</button>`;
+  if (mode === 'day' && state.bookFilter) other = `<button class="chip active" data-clear="book">${esc(getBook(state.bookFilter).name)} ✕</button>`;
+  const chips =
+    mode === 'day'
+      ? chip('day', '', !state.dayFilter, 'Alle Tage') + days.map((d) => chip('day', d, state.dayFilter === d, dayLabel(d), dayCounts.get(d))).join('')
+      : chip('book', '', !state.bookFilter, 'Alle Bücher') +
+        books.map((b) => chip('book', b, state.bookFilter === b, getBook(b).name, bookCounts.get(b))).join('');
+  bar.innerHTML = seg + other + chips;
 }
 
 function renderDrawer() {
   if (!drawer.classList.contains('open')) return;
-  renderDayFilter();
+  renderFilters();
   const q = $('#drawer-search').value.trim().toLowerCase();
   const list = $('#drawer-list');
   if (state.drawerTab === 'notes') {
     const notes = sortedNotes().filter((n) => {
       if (state.dayFilter && !noteDays(n).includes(state.dayFilter)) return false;
+      if (state.bookFilter && !(n.refs || []).some((r) => r.book === state.bookFilter)) return false;
       if (!q) return true;
       const hay = `${n.title} ${n.text} ${(n.refs || []).map((r) => formatRef(r) + ' ' + formatRef(r, true)).join(' ')}`.toLowerCase();
       return hay.includes(q);
     });
     if (!notes.length) {
-      list.innerHTML = `<div class="empty">${q || state.dayFilter ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere rechts eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
+      list.innerHTML = `<div class="empty">${q || state.dayFilter || state.bookFilter ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere rechts eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
       return;
     }
+    // Buchfilter: zum Durchgehen in Bibelreihenfolge statt nach Datum
+    if (state.bookFilter) notes.sort((x, y) => compareRefs(firstRefIn(x, state.bookFilter), firstRefIn(y, state.bookFilter)));
     let lastDay = null;
+    let lastChapter = null;
     list.innerHTML = notes
       .map((n) => {
         // ohne Tagesfilter: Überschrift je Tag der letzten Bearbeitung
         let head = '';
         const d = dayKey(n.updated);
-        if (!state.dayFilter && d !== lastDay) {
+        if (state.bookFilter) {
+          const ch = firstRefIn(n, state.bookFilter).chapter;
+          if (ch !== lastChapter) {
+            head = `<h5 class="day-head">${esc(getBook(state.bookFilter).name)} · Kapitel ${ch}</h5>`;
+            lastChapter = ch;
+          }
+        } else if (!state.dayFilter && d !== lastDay) {
           head = `<h5 class="day-head">${esc(dayLabel(d, true))}</h5>`;
           lastDay = d;
         }
@@ -301,10 +344,11 @@ function renderDrawer() {
     for (const m of state.marks) items.push({ ...m, day: refDay(m), label: 'Nur markiert' });
     const filtered = items
       .filter((r) => !state.dayFilter || r.day === state.dayFilter)
+      .filter((r) => !state.bookFilter || r.book === state.bookFilter)
       .filter((r) => !q || `${formatRef(r)} ${formatRef(r, true)} ${r.label}`.toLowerCase().includes(q))
       .sort(compareRefs);
     if (!filtered.length) {
-      list.innerHTML = `<div class="empty">${q || state.dayFilter ? 'Nichts gefunden.' : 'Noch keine markierten Bibelstellen.'}</div>`;
+      list.innerHTML = `<div class="empty">${q || state.dayFilter || state.bookFilter ? 'Nichts gefunden.' : 'Noch keine markierten Bibelstellen.'}</div>`;
       return;
     }
     let html = '';
@@ -334,9 +378,13 @@ function bindDrawer() {
   };
   $('#drawer-search').addEventListener('input', renderDrawer);
   $('#day-filter').addEventListener('click', (e) => {
-    const c = e.target.closest('[data-day]');
-    if (!c) return;
-    state.dayFilter = c.dataset.day || null;
+    const t = e.target.closest('button');
+    if (!t) return;
+    if (t.dataset.mode) state.filterMode = t.dataset.mode;
+    else if ('day' in t.dataset) state.dayFilter = t.dataset.day || null;
+    else if ('book' in t.dataset) state.bookFilter = t.dataset.book ? +t.dataset.book : null;
+    else if (t.dataset.clear === 'day') state.dayFilter = null;
+    else if (t.dataset.clear === 'book') state.bookFilter = null;
     renderDrawer();
     $('#drawer-list').scrollTop = 0;
   });

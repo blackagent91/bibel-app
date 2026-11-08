@@ -40,6 +40,9 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 - **Nach Tag filtern:** Leiste mit allen Tagen, an denen du gearbeitet hast („Heute“, „Gestern“,
   „Do., 5. Nov.“ …). Ein Tipp zeigt nur die Notizen, die an diesem Tag erstellt oder bearbeitet
   wurden, bzw. die Stellen, die an dem Tag markiert wurden. Ohne Filter ist die Liste nach Tagen gegliedert.
+- **Nach Buch filtern:** Umschalter „Bücher“ – zeigt alle Bibelbücher, zu denen es Notizen gibt.
+  Ein Tipp sammelt alle Notizen zu dem Buch, in Bibelreihenfolge und nach Kapiteln gegliedert –
+  ideal, um ein durchgenommenes Buch noch einmal Revue passieren zu lassen. Tag und Buch lassen sich kombinieren.
 - Stellen mit Notiz sind in der Bibel farbig hinterlegt und tragen ein kleines Notiz-Symbol.
   Tippst du darauf, öffnet sich die Notiz.
 
