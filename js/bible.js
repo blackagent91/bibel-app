@@ -571,7 +571,8 @@ export class BibleView {
     this.el.toc.classList.add('open');
     this.el.tocInput.value = '';
     this.renderBooks();
-    setTimeout(() => this.el.tocInput.focus({ preventScroll: true }), 30);
+    // nur mit Maus/Tastatur direkt ins Eingabefeld – auf dem iPad würde sonst die Tastatur die Bücher verdecken
+    if (window.matchMedia('(pointer: fine)').matches) setTimeout(() => this.el.tocInput.focus({ preventScroll: true }), 30);
   }
   closeToc() {
     this.el.toc.classList.remove('open');

@@ -488,14 +488,20 @@ export class NotesEditor {
     return { anchor, before: false };
   }
 
+  /**
+   * Schreibposition setzen. Den Cursor sichtbar setzen nur, wenn im Notizfeld schon geschrieben wird –
+   * sonst würde sich auf dem iPad ungefragt die Tastatur öffnen. Die Position wird trotzdem gemerkt.
+   */
   placeCaret(el, atStart = true) {
     const r = document.createRange();
     r.selectNodeContents(el);
     r.collapse(atStart);
+    this.lastRange = r.cloneRange();
+    const ed = this.el.editor;
+    if (document.activeElement !== ed && !ed.contains(document.activeElement)) return;
     const s = window.getSelection();
     s.removeAllRanges();
     s.addRange(r);
-    this.lastRange = r.cloneRange();
   }
 
   // ------------------------------------------------------------------ Editor-Ereignisse

@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '34 · 08.11.2026';
+export const APP_VERSION = '35 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -181,7 +181,6 @@ function handleBibleAction(sel, act, extra) {
     for (const p of parts) editor.insertScripture(p, { color: 'yellow' });
     bible.clearSelection();
     showPane('notes');
-    setTimeout(() => editor.el.editor.focus(), 50);
     toast(`Notiz „${n.title}“ erstellt`);
     return;
   }
@@ -389,7 +388,6 @@ function bindDrawer() {
   $('#drawer-new').onclick = () => {
     createNote();
     closeDrawer();
-    setTimeout(() => editor.el.title.focus(), 50);
   };
   $('#drawer-search').addEventListener('input', renderDrawer);
   $('#day-filter').addEventListener('click', (e) => {
@@ -529,7 +527,6 @@ function bindLayout() {
   $$('.mode-btn').forEach((b) => (b.onclick = () => editor.setMode(b.dataset.mode)));
   $('#btn-new-note').onclick = () => {
     createNote();
-    setTimeout(() => editor.el.title.focus(), 50);
   };
 }
 
