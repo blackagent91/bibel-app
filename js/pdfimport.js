@@ -74,10 +74,11 @@ const TITLE_PATTERNS = [
   [/hebr(ä|ae)er/, 58],
   [/jakobus/, 59],
   [/petrus/, [60, 61]],
+  // Offenbarung vor Johannes prüfen: der Titel lautet oft „Die Offenbarung des Johannes“
+  [/offenbarung|apokalypse/, 66],
   [/brief.*johannes|johannes.*brief/, [62, 63, 64]],
   [/johannes/, 43],
   [/judas/, 65],
-  [/offenbarung/, 66],
 ];
 
 export function matchBookTitle(title) {

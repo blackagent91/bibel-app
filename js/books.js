@@ -66,7 +66,7 @@ const RAW = [
   ['2. Johannes', '2Joh', 1, ['2jo']],
   ['3. Johannes', '3Joh', 1, ['3jo']],
   ['Judas', 'Jud', 1, []],
-  ['Offenbarung', 'Offb', 22, ['off', 'offenb', 'apk', 'apokalypse', 'offenbarungjohannes']],
+  ['Offenbarung', 'Offb', 22, ['off', 'offenb', 'apk', 'apokalypse', 'offenbarungjohannes', 'offenbarungdesjohannes', 'offenbarungjesuchristi']],
 ];
 
 export const BOOKS = RAW.map(([name, abbr, chapters, aliases], i) => ({
