@@ -16,6 +16,7 @@ const state = {
   drawerTab: 'notes',
 };
 
+export const APP_VERSION = '7 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50 };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -411,6 +412,7 @@ function renderTranslations() {
 function bindSettings() {
   const modal = $('#settings');
   $('#btn-settings').onclick = () => {
+    $('#app-version').textContent = `App-Version ${APP_VERSION}`;
     $('#set-bible-size').value = settings.bibleSize;
     $('#set-note-size').value = settings.noteSize;
     $('#set-layout').value = settings.layout;
@@ -492,9 +494,11 @@ function bindSettings() {
         ...(r.missingBooks.length ? [`Nicht gefunden: ${r.missingBooks.join(', ')}`] : []),
         ...r.chapterIssues,
       ];
+      const extra = [...(r.fallbacks || []), ...(r.unmatched || []).map((u) => `Überschrift nicht zugeordnet – ${u}`)];
       html += issues.length
         ? `<p class="hint">Folgendes konnte nicht vollständig erkannt werden – diese Stellen fehlen oder sind unvollständig:</p><div class="report-list">${issues.map(esc).join('<br>')}</div>`
         : `<p class="report-ok">✓ Alle Bücher und Kapitel wurden erkannt.</p>`;
+      if (extra.length) html += `<p class="hint">Hinweise (für die Fehlersuche):</p><div class="report-list">${extra.map(esc).join('<br>')}</div>`;
       html += `<p class="hint">Stichprobe: Schau dir ein paar Kapitel an. Wenn irgendwo Überschriften oder Fußnoten im Text stehen, sag Bescheid.</p>`;
     } else {
       html += `<p class="report-ok">✓ ${res.verses.toLocaleString('de-DE')} Verse importiert.</p>`;

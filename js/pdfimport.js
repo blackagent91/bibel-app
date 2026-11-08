@@ -123,6 +123,8 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   try { meta = (await pdf.getMetadata())?.info || {}; } catch {}
 
   const books = [];
+  const notes = { unmatched: [], fallbacks: [] }; // für den Prüfbericht
+  let pageNo = 0;
   const st = {
     book: 0,
     chapter: 0,
@@ -179,6 +181,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     const vp = page.getViewport({ scale: 1 });
     const tc = await page.getTextContent();
     page.cleanup();
+    pageNo = pn;
     processPage(tc.items, vp.width);
     if (pn % 5 === 0 || pn === pdf.numPages) {
       onProgress({ page: pn, pages: pdf.numPages, book: st.book });
@@ -199,7 +202,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     }
     out.push(b);
   }
-  return { name: guessName(meta, file.name), books: out, report: buildReport(out) };
+  return { name: guessName(meta, file.name), books: out, report: { ...buildReport(out), ...notes } };
 
   // -------------------------------------------------------------------------
   function processPage(rawItems, pageWidth) {
@@ -253,6 +256,10 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       titleId = matchBookTitle(t);
       titleTop = Math.max(...titles.map((i) => i.y + i.size));
     }
+    if (titles.length && !(titleId && titleId > st.book) && notes.unmatched.length < 20) {
+      const t = titles.map((i) => i.s).join(' ').replace(/\s+/g, ' ').trim();
+      if (t && titleId !== st.book) notes.unmatched.push(`Seite ${pageNo}: „${t.slice(0, 80)}“`);
+    }
     if (titleId && titleId > st.book) {
       const above = (i) => i.y > titleTop;
       processRegion(normal.filter(above), drops.filter(above), pageWidth, body, bodyFont);
@@ -302,8 +309,17 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   }
 
   function handleDrop(n) {
-    if (!st.book || st.book === 19) return;
+    if (!st.book) return;
     if (n === 1 && st.provisional) return startChapter(1, 1);
+    // Absicherung: neues „Kapitel 1“ ohne erkannten Buchtitel -> nächstes Buch der Bibel
+    if (n === 1 && st.book < 66 && (st.chapter > 1 || st.verse > 1)) {
+      const next = st.book + 1;
+      notes.fallbacks.push(`Seite ${pageNo}: Buchanfang ohne erkannten Titel → als „${BOOKS[next - 1].name}“ eingeordnet`);
+      startBook(next);
+      if (next !== 19) startChapter(1, 1);
+      return;
+    }
+    if (st.book === 19) return; // Psalmen beginnen mit „Psalm N“
     if (n > st.chapter && n <= st.chapter + 3) startChapter(n, 1);
   }
 
