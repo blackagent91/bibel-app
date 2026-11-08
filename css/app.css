@@ -725,3 +725,19 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 }
 .scripture-remove svg { width: 16px; height: 16px; }
 .scripture-remove:hover { background: rgba(255,107,107,.14); color: var(--danger); }
+
+/* Griff zum Verschieben eines Bibelstellen-Blocks */
+.scripture, .scripture[data-open] { padding-left: 42px; }
+.scripture::before { left: 0; }
+.scripture-grip {
+  position: absolute; left: 8px; top: 7px; width: 28px; height: 30px; border-radius: 7px;
+  border: 0; background: transparent; color: var(--text-3);
+  display: flex; align-items: center; justify-content: center; cursor: grab; touch-action: none;
+}
+.scripture-grip svg { width: 16px; height: 16px; }
+.scripture-grip:hover { background: var(--bg-3); color: var(--text); }
+.scripture.dragging-block {
+  position: relative; z-index: 6; opacity: .92; cursor: grabbing;
+  box-shadow: 0 14px 40px rgba(0,0,0,.6); border-color: var(--accent);
+}
+.scripture.dragging-block .scripture-grip { color: var(--accent); }

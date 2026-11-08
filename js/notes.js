@@ -33,6 +33,7 @@ export function scriptureHTML(p, color = 'yellow') {
   const verses = (p.verses || []).map((v) => `<sup>${v.n}</sup>${esc(v.t)}`).join(' ');
   return (
     `<div class="scripture" contenteditable="false" data-color="${color}" data-added="${Date.now()}" data-ref='${JSON.stringify(ref)}'>` +
+    `<button class="scripture-grip" type="button" contenteditable="false" aria-label="Bibelstelle verschieben" title="Gedrückt halten und ziehen zum Verschieben"><svg viewBox="0 0 24 24"><g fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></g></svg></button>` +
     `<button class="scripture-ref" type="button">${esc(formatRef(ref))}<span class="scripture-trans">${esc(p.transShort || '')}</span></button>` +
     `<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><button class="scripture-remove" type="button" contenteditable="false" aria-label="Bibelstelle entfernen" title="Entfernen"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>` +
     `<div class="scripture-text">${verses}</div></div>`
@@ -331,6 +332,7 @@ export class NotesEditor {
       if (!this.el.editor.contains(el)) continue;
       const block = el.closest('.scripture');
       if (!block) continue;
+      if (el.closest('.scripture-grip')) return { kind: 'grip', block };
       if (el.closest('.scripture-remove')) return { kind: 'remove', block };
       if (el.closest('.scripture-toggle')) return { kind: 'toggle', block };
       if (el.closest('.scripture-ref')) return { kind: 'ref', block };
@@ -426,6 +428,74 @@ export class NotesEditor {
       text.normalize();
     });
     this.changed();
+  }
+
+  /**
+   * Bibelstellen-Block am Griff nach oben/unten ziehen. Eine goldene Linie zeigt die Zielposition.
+   * Ein kurzer Tipp ohne Ziehen zeigt die Knöpfe ↑ ↓ zum schrittweisen Verschieben.
+   */
+  startBlockDrag(block, e) {
+    const ed = this.el.editor;
+    const id = e.pointerId;
+    const y0 = e.clientY;
+    let moved = false;
+    let target = null; // Element, vor das eingefügt wird (null = ans Ende)
+    const hint = this.el.dropHint;
+    const pageTop = () => this.el.page.getBoundingClientRect().top;
+    const findTarget = (y) => {
+      for (const c of ed.children) {
+        if (c === block) continue;
+        const r = c.getBoundingClientRect();
+        if (y < r.top + r.height / 2) return c;
+      }
+      return null;
+    };
+    const move = (ev) => {
+      if (ev.pointerId !== id) return;
+      const dy = ev.clientY - y0;
+      if (!moved && Math.abs(dy) < 6) return;
+      if (!moved) {
+        moved = true;
+        block.classList.add('dragging-block');
+        document.body.classList.add('dragging-ref');
+        this.hideHandle();
+      }
+      ev.preventDefault();
+      block.style.transform = `translateY(${dy}px)`;
+      target = findTarget(ev.clientY);
+      const ref = target || ed.lastElementChild;
+      const r = ref.getBoundingClientRect();
+      hint.style.top = `${(target ? r.top - 6 : r.bottom + 4) - pageTop()}px`;
+      hint.classList.add('show');
+      // am Rand automatisch scrollen
+      const sr = this.el.scroll.getBoundingClientRect();
+      if (ev.clientY < sr.top + 40) this.el.scroll.scrollTop -= 12;
+      else if (ev.clientY > sr.bottom - 40) this.el.scroll.scrollTop += 12;
+    };
+    const up = (ev) => {
+      if (ev.pointerId !== id) return;
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+      block.classList.remove('dragging-block');
+      document.body.classList.remove('dragging-ref');
+      block.style.transform = '';
+      hint.classList.remove('show');
+      if (!moved) {
+        this.showHandle(block); // kurzer Tipp: ↑ ↓ anzeigen
+        return;
+      }
+      if (ev.type !== 'pointerup' || target === block.nextElementSibling) return;
+      this.structural(() => {
+        if (target) target.before(block);
+        else ed.append(block);
+      });
+      this.changed();
+      this.save.flush();
+    };
+    window.addEventListener('pointermove', move, { capture: true, passive: false });
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
   }
 
   /** Bibelstellen-Block entfernen (Rückgängig holt ihn zurück) */
@@ -555,6 +625,11 @@ export class NotesEditor {
     ed.addEventListener('pointerdown', (e) => {
       const block = e.target.closest?.('.scripture');
       if (!block || this.mode !== 'text') return;
+      if (e.target.closest('.scripture-grip')) {
+        e.preventDefault();
+        this.startBlockDrag(block, e);
+        return;
+      }
       const onText = e.target.closest('.scripture-text') && block.hasAttribute('data-open');
       if (!onText) {
         e.preventDefault(); // Pfeil, Kopfzeile, eingeklappte Vorschau: kein Cursor, keine Tastatur
@@ -849,6 +924,7 @@ export class NotesEditor {
     const ed = this.el.editor;
     const h = this.el.handle;
     const show = (target) => {
+      if (document.body.classList.contains('dragging-ref')) return; // nicht während ein Block gezogen wird
       const blk = target?.closest?.('.scripture, .callout, blockquote, hr');
       if (!blk || !ed.contains(blk)) return;
       const top = this.topBlock(blk);
@@ -1153,6 +1229,10 @@ class Ink {
       this.measure();
       // Bibelstellen-Block unter dem Stift? Pfeil/Kopfzeile = antippen, Bibeltext = Wörter markieren
       const hit = this.ed.hitScripture(e.clientX, e.clientY);
+      if (hit && hit.kind === 'grip') {
+        this.ed.startBlockDrag(hit.block, e);
+        return;
+      }
       if (hit && hit.kind !== 'text') {
         this.current = { tap: true, hit, id: e.pointerId, pen: isPen, x0: e.clientX, y0: e.clientY };
         return;
@@ -1565,6 +1645,7 @@ function bbox(p) {
 /** Ältere Bibelstellen-Blöcke um Aufklapp-Pfeil und Markierbarkeit ergänzen */
 function upgradeScriptureBlocks(root) {
   for (const b of root.querySelectorAll('.scripture')) {
+    if (!b.querySelector('.scripture-grip')) b.insertAdjacentHTML('afterbegin', '<button class="scripture-grip" type="button" contenteditable="false" aria-label="Bibelstelle verschieben" title="Gedrückt halten und ziehen zum Verschieben"><svg viewBox="0 0 24 24"><g fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></g></svg></button>');
     if (b.querySelector('.scripture-toggle') && !b.querySelector('.scripture-remove')) {
       b.querySelector('.scripture-toggle').insertAdjacentHTML('afterend', '<button class="scripture-remove" type="button" contenteditable="false" aria-label="Bibelstelle entfernen" title="Entfernen"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>');
     }
