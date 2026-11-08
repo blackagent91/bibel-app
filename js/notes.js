@@ -1,6 +1,6 @@
 // Linke Seite: Notiz-Editor (Text + Blöcke) und Zeichenebene für Apple Pencil
 import { formatRef } from './books.js';
-import { $, $$, esc, COLORS, debounce, toast, dayKey } from './util.js';
+import { $, $$, esc, COLORS, debounce, toast, dayKey, caretRangeAt } from './util.js';
 
 const TEXT_COLORS = ['#f2f2f2', '#b4b4ba', '#e8c26e', '#6cd28c', '#6eaaff', '#ff78b4', '#aa82ff', '#ff9650', '#ff6b6b'];
 const HILITE = {
@@ -35,7 +35,7 @@ export function scriptureHTML(p, color = 'yellow') {
     `<div class="scripture" contenteditable="false" data-color="${color}" data-added="${Date.now()}" data-ref='${JSON.stringify(ref)}'>` +
     `<button class="scripture-ref" type="button">${esc(formatRef(ref))}<span class="scripture-trans">${esc(p.transShort || '')}</span></button>` +
     `<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>` +
-    `<div class="scripture-text" contenteditable="true" spellcheck="false">${verses}</div></div>`
+    `<div class="scripture-text">${verses}</div></div>`
   );
 }
 
@@ -325,6 +325,104 @@ export class NotesEditor {
     return block;
   }
 
+  /** Was liegt unter einem Punkt im Notizfeld? (für Stift-Tipps durch die Zeichenfläche hindurch) */
+  hitScripture(x, y) {
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (!this.el.editor.contains(el)) continue;
+      const block = el.closest('.scripture');
+      if (!block) continue;
+      if (el.closest('.scripture-toggle')) return { kind: 'toggle', block };
+      if (el.closest('.scripture-ref')) return { kind: 'ref', block };
+      if (!block.hasAttribute('data-open')) return { kind: 'collapsed', block };
+      if (el.closest('.scripture-text')) return { kind: 'text', block };
+      return { kind: 'block', block };
+    }
+    return null;
+  }
+
+  /** Tipp auf einen Block ausführen: auf-/zuklappen oder zur Stelle springen */
+  tapScripture(hit) {
+    if (!hit) return false;
+    if (hit.kind === 'ref') {
+      this.onJump(JSON.parse(hit.block.dataset.ref));
+      return true;
+    }
+    if (hit.kind === 'toggle' || hit.kind === 'collapsed') {
+      this.toggleScripture(hit.block);
+      return true;
+    }
+    return false;
+  }
+
+  /** Wortgenauen Bereich zwischen zwei Bildschirmpunkten im Bibeltext eines Blocks bestimmen */
+  wordRange(text, x0, y0, x1, y1) {
+    const a = caretRangeAt(x0, y0);
+    const b = caretRangeAt(x1, y1);
+    const pick = (r, atEnd) => {
+      if (r && text.contains(r.startContainer)) return [r.startContainer, r.startOffset];
+      // außerhalb: an den Anfang bzw. das Ende des Textes
+      const w = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
+      let n, last = null, first = null;
+      while ((n = w.nextNode())) { if (!first) first = n; last = n; }
+      return atEnd ? [last, last?.data.length || 0] : [first, 0];
+    };
+    let [sn, so] = pick(a, false);
+    let [en, eo] = pick(b, true);
+    if (!sn || !en) return null;
+    const range = document.createRange();
+    range.setStart(sn, so);
+    range.setEnd(sn, so);
+    const cmp = range.comparePoint(en, eo);
+    if (cmp < 0) [sn, so, en, eo] = [en, eo, sn, so];
+    // auf ganze Wörter erweitern
+    if (sn.nodeType === 3) while (so > 0 && /[\p{L}\p{N}'’-]/u.test(sn.data[so - 1])) so--;
+    if (en.nodeType === 3) while (eo < en.data.length && /[\p{L}\p{N}'’-]/u.test(en.data[eo])) eo++;
+    range.setStart(sn, so);
+    range.setEnd(en, eo);
+    return range.collapsed ? null : range;
+  }
+
+  /** Wörter im Bibeltext markieren (Farbe) bzw. Markierung entfernen (null) */
+  markWords(text, range, color) {
+    this.structural(() => {
+      const nodes = [];
+      const w = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
+      let n;
+      while ((n = w.nextNode())) {
+        if (range.intersectsNode(n) && n.data.length && !n.parentElement.closest('sup')) nodes.push(n);
+      }
+      const sc = range.startContainer, so = range.startOffset, ec = range.endContainer, eo = range.endOffset;
+      for (let node of nodes) {
+        let start = node === sc ? so : 0;
+        let end = node === ec ? eo : node.data.length;
+        if (start >= end) continue;
+        if (end < node.data.length) node.splitText(end);
+        if (start > 0) node = node.splitText(start);
+        const wrap = node.parentElement.closest('span[style*="background"]');
+        if (wrap && text.contains(wrap)) {
+          // bestehende Markierung um dieses Stück auftrennen
+          const before = wrap.cloneNode(false);
+          const after = wrap.cloneNode(false);
+          let cur = wrap.firstChild;
+          while (cur && cur !== node && !cur.contains(node)) { const nx = cur.nextSibling; before.append(cur); cur = nx; }
+          cur = node.nextSibling;
+          while (cur) { const nx = cur.nextSibling; after.append(cur); cur = nx; }
+          if (before.childNodes.length) wrap.before(before);
+          if (after.childNodes.length) wrap.after(after);
+          wrap.replaceWith(node);
+        }
+        if (color) {
+          const s = document.createElement('span');
+          s.style.backgroundColor = color;
+          node.replaceWith(s);
+          s.append(node);
+        }
+      }
+      text.normalize();
+    });
+    this.changed();
+  }
+
   toggleScripture(block) {
     if (!block) return;
     if (block.hasAttribute('data-open')) block.removeAttribute('data-open');
@@ -412,6 +510,34 @@ export class NotesEditor {
         ed.innerHTML = '<p><br></p>';
         this.placeCaret(ed.firstChild);
       }
+    });
+
+    // Tippen auf einen Bibelstellen-Block soll nie die Tastatur öffnen
+    ed.addEventListener('pointerdown', (e) => {
+      const block = e.target.closest?.('.scripture');
+      if (!block || this.mode !== 'text') return;
+      const onText = e.target.closest('.scripture-text') && block.hasAttribute('data-open');
+      if (!onText) {
+        e.preventDefault(); // Pfeil, Kopfzeile, eingeklappte Vorschau: kein Cursor, keine Tastatur
+        return;
+      }
+      // Im aufgeklappten Bibeltext Wörter auswählen, ohne dass das Notizfeld den Fokus bekommt
+      if (document.activeElement !== ed) {
+        ed.contentEditable = 'false';
+        const restore = () => {
+          setTimeout(() => {
+            if (this.mode === 'text') ed.contentEditable = 'true';
+          }, 60);
+          window.removeEventListener('pointerup', restore, true);
+          window.removeEventListener('pointercancel', restore, true);
+        };
+        window.addEventListener('pointerup', restore, true);
+        window.addEventListener('pointercancel', restore, true);
+      }
+    });
+    ed.addEventListener('mousedown', (e) => {
+      const block = e.target.closest?.('.scripture');
+      if (block && this.mode === 'text' && !(e.target.closest('.scripture-text') && block.hasAttribute('data-open'))) e.preventDefault();
     });
 
     ed.addEventListener('click', (e) => {
@@ -537,6 +663,17 @@ export class NotesEditor {
       pop.addEventListener('click', (e) => {
         const t = e.target.closest('button');
         if (!t) return;
+        const r = this.lastRange;
+        const inScripture = r && !r.collapsed && r.commonAncestorContainer.parentElement?.closest?.('.scripture-text, .scripture');
+        if (t.dataset.hilite && inScripture) {
+          const text = (r.startContainer.parentElement || r.startContainer).closest('.scripture')?.querySelector('.scripture-text');
+          if (text) {
+            this.markWords(text, r, t.dataset.hilite === 'none' ? null : HILITE[t.dataset.hilite]);
+            window.getSelection().removeAllRanges();
+            this.closePops();
+            return;
+          }
+        }
         this.restoreRange();
         document.execCommand('styleWithCSS', false, true);
         if (t.dataset.hilite) {
@@ -962,7 +1099,7 @@ class Ink {
         if (palm || this.penActive()) return; // Handballen ignorieren
         if (this.pencilOnly) {
           // Finger scrollt, Pencil zeichnet
-          this.pan = { id: e.pointerId, y: e.clientY, top: this.ed.el.scroll.scrollTop };
+          this.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), top: this.ed.el.scroll.scrollTop };
           capture(c, e.pointerId);
           return;
         }
@@ -970,6 +1107,20 @@ class Ink {
       if (this.current) return;
       capture(c, e.pointerId);
       this.measure();
+      // Bibelstellen-Block unter dem Stift? Pfeil/Kopfzeile = antippen, Bibeltext = Wörter markieren
+      const hit = this.ed.hitScripture(e.clientX, e.clientY);
+      if (hit && hit.kind !== 'text') {
+        this.current = { tap: true, hit, id: e.pointerId, pen: isPen, x0: e.clientX, y0: e.clientY };
+        return;
+      }
+      if (hit && hit.kind === 'text') {
+        this.current = {
+          mark: true, id: e.pointerId, pen: isPen, x0: e.clientX, y0: e.clientY,
+          text: hit.block.querySelector('.scripture-text'), remove: this.tool === 'eraser',
+        };
+        this.previewMark(e.clientX, e.clientY);
+        return;
+      }
       const [x, y] = this.toPage(e);
       if (this.tool === 'eraser') {
         this.pushUndo();
@@ -998,6 +1149,11 @@ class Ink {
       const cur = this.current;
       if (!cur || e.pointerId !== cur.id) return;
       if (cur.pen) this.lastPen = Date.now();
+      if (cur.tap) return;
+      if (cur.mark) {
+        this.previewMark(e.clientX, e.clientY);
+        return;
+      }
       const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       const p = cur.s ? cur.s.p : null;
       for (const ev of events.length ? events : [e]) {
@@ -1017,7 +1173,12 @@ class Ink {
 
     const end = (e) => {
       if (this.pan && e.pointerId === this.pan.id) {
+        const p = this.pan;
         this.pan = null;
+        // kurzer Finger-Tipp ohne Bewegung (Stift-Modus): Block auf-/zuklappen bzw. zur Stelle springen
+        if (e.type === 'pointerup' && Math.abs(e.clientX - p.x) < 10 && Math.abs(e.clientY - p.y) < 10 && Date.now() - p.t < 400) {
+          this.ed.tapScripture(this.ed.hitScripture(e.clientX, e.clientY));
+        }
         return;
       }
       const cur = this.current;
@@ -1026,6 +1187,16 @@ class Ink {
       if (cur.pen) {
         this.lastPen = Date.now();
         this.stopInkingSoon();
+      }
+      if (cur.tap) {
+        if (e.type === 'pointerup' && Math.abs(e.clientX - cur.x0) < 12 && Math.abs(e.clientY - cur.y0) < 12) this.ed.tapScripture(cur.hit);
+        return;
+      }
+      if (cur.mark) {
+        this.clearLive();
+        const r = e.type === 'pointerup' && this.markRange(cur, e.clientX, e.clientY);
+        if (r) this.ed.markWords(cur.text, r, cur.remove ? null : markerColorFor(this.color));
+        return;
       }
       if (cur.eraser) {
         if (this.undoStack.length && this.undoStack[this.undoStack.length - 1].length === this.strokes.length) this.undoStack.pop();
@@ -1155,6 +1326,33 @@ class Ink {
     this.geo = null;
     this.schedule();
     if (this.current) this.scheduleLive(true);
+  }
+
+  /** Wortbereich vom Start- bis zum aktuellen Punkt (Zeichenfläche dafür kurz durchlässig machen) */
+  markRange(cur, x, y) {
+    const c = this.canvas;
+    const prev = c.style.pointerEvents;
+    c.style.pointerEvents = 'none'; // damit die Textposition unter dem Stift gefunden wird
+    try {
+      return this.ed.wordRange(cur.text, cur.x0, cur.y0, x, y);
+    } finally {
+      c.style.pointerEvents = prev;
+    }
+  }
+
+  /** Vorschau beim Markieren im Bibeltext: überstrichene Wörter hervorheben */
+  previewMark(x, y) {
+    const cur = this.current;
+    if (!cur?.mark) return;
+    const r = this.markRange(cur, x, y);
+    this.clearLive();
+    if (!r) return;
+    const br = this.ed.el.body.getBoundingClientRect();
+    const dpr = this.dpr || 1;
+    const ctx = this.lctx;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = cur.remove ? 'rgba(255,107,107,.28)' : markerColorFor(this.color);
+    for (const rect of r.getClientRects()) ctx.fillRect(rect.left - br.left, rect.top - br.top, rect.width, rect.height);
   }
 
   /** Zeichenfläche auf die Seitenkoordinaten einstellen */
@@ -1327,11 +1525,24 @@ function upgradeScriptureBlocks(root) {
       b.querySelector('.scripture-ref')?.insertAdjacentHTML('afterend', '<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>');
     }
     const t = b.querySelector('.scripture-text');
-    if (t && t.getAttribute('contenteditable') !== 'true') {
-      t.setAttribute('contenteditable', 'true');
-      t.setAttribute('spellcheck', 'false');
+    if (t) {
+      t.removeAttribute('contenteditable'); // nur markierbar, nicht bearbeitbar -> keine Tastatur
+      t.removeAttribute('spellcheck');
     }
   }
+}
+
+/** Stiftfarbe -> passende Textmarker-Farbe für Wörter im Bibeltext */
+function markerColorFor(hex) {
+  const map = {
+    '#e8c26e': HILITE.yellow,
+    '#6cd28c': HILITE.green,
+    '#6eaaff': HILITE.blue,
+    '#ff78b4': HILITE.pink,
+    '#aa82ff': HILITE.purple,
+    '#ff6b6b': HILITE.orange,
+  };
+  return map[hex] || HILITE.yellow; // Weiß/Grau -> Gelb
 }
 
 /** Zuletzt gewähltes Papier (für neue Notizen) */
