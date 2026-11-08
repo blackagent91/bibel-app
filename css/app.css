@@ -763,3 +763,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .ref-item .ref-del { flex: none; width: 32px; height: 32px; opacity: .55; }
 .ref-item:hover .ref-del { opacity: 1; }
 .ref-item .ref-del:hover { color: var(--danger); background: rgba(255,107,107,.12); }
+
+/* Notizen-Vollbild: Verzeichnis als Seitenleiste, die Notiz rückt daneben */
+.app.focus-notes.drawer-docked .notes-pane { padding-left: min(340px, 40%); }
+.app.focus-notes.drawer-docked .drawer { width: min(340px, 40%); box-shadow: none; transition: none; }
+.app.focus-notes.drawer-docked .drawer-scrim { display: none; }

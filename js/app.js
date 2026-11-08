@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '45 · 08.11.2026';
+export const APP_VERSION = '46 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -282,11 +282,15 @@ function openDrawer() {
   editor.save.flush();
   drawer.classList.add('open');
   drawer.setAttribute('aria-hidden', 'false');
+  // Im Notizen-Vollbild als Seitenleiste neben der Notiz (die Notiz bleibt sichtbar)
+  app.classList.toggle('drawer-docked', state.focus === 'notes');
   renderDrawer();
 }
-function closeDrawer() {
+function closeDrawer({ force = false } = {}) {
+  if (!force && app.classList.contains('drawer-docked')) return; // Seitenleiste bleibt offen, bis man sie schließt
   drawer.classList.remove('open');
   drawer.setAttribute('aria-hidden', 'true');
+  app.classList.remove('drawer-docked');
 }
 
 /** Erste Bibelstelle einer Notiz in einem bestimmten Buch (für die Sortierung beim Buchfilter) */
@@ -424,8 +428,8 @@ function renderDrawer() {
 
 function bindDrawer() {
   $('#btn-index').onclick = openDrawer;
-  $('#drawer-close').onclick = closeDrawer;
-  $('#drawer-scrim').onclick = closeDrawer;
+  $('#drawer-close').onclick = () => closeDrawer({ force: true });
+  $('#drawer-scrim').onclick = () => closeDrawer({ force: true });
   $('#drawer-new').onclick = () => {
     createNote();
     closeDrawer();
@@ -592,6 +596,11 @@ function capture(el, id) {
 function setFocus(which) {
   if (isNarrow()) which = null; // auf dem Handy gibt es ohnehin nur eine Seite
   state.focus = which;
+  // Verzeichnis: im Notizen-Vollbild als Seitenleiste, sonst wieder normal (darüber)
+  if (drawer.classList.contains('open')) {
+    if (which === 'notes') app.classList.add('drawer-docked');
+    else closeDrawer({ force: true });
+  }
   app.classList.toggle('focus-notes', which === 'notes');
   app.classList.toggle('focus-bible', which === 'bible');
   const bar = $('#focus-bar');

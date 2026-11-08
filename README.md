@@ -27,6 +27,7 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 - Knopf oben in der Kopfzeile von Notizen bzw. Bibel: die Seite füllt den ganzen Bildschirm.
 - Im Vollbild wechselt der Knopf unten („Zur Bibel“ / „Zu den Notizen“) zwischen beiden Seiten.
 - Im Notizen-Vollbild blätterst du mit den Pfeilen links und rechts durch alle Notizen (Reihenfolge wie im Verzeichnis, nach der letzten geht es wieder bei der ersten los; „2 / 5“ zeigt, wo du bist).
+- Im Notizen-Vollbild öffnet das Verzeichnis als Seitenleiste neben der Notiz: Die Notiz bleibt sichtbar, ein Tipp auf eine Notiz wechselt direkt die Ansicht, die Leiste bleibt offen, bis du sie mit ✕ schließt.
 - Derselbe Knopf oben (oder eine angetippte Bibelstelle / „Notiz erstellen“) führt zurück zur geteilten Ansicht.
 
 **Bibel lesen ohne Verrutschen**
