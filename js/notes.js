@@ -191,6 +191,7 @@ export class NotesEditor {
     this.dirty = false;
     const n = this.note;
     if (this.dirtyText || n.html == null) {
+      const oldRefs = n.refs || [];
       n.title = this.el.title.value.trim();
       n.html = this.el.editor.innerHTML;
       const clone = this.el.editor.cloneNode(true);
@@ -198,6 +199,14 @@ export class NotesEditor {
       clone.querySelectorAll('p, div, li, h1, h2, h3, blockquote').forEach((b) => b.append(' '));
       n.text = clone.textContent.replace(/\s+/g, ' ').trim().slice(0, 400);
       n.refs = this.extractRefs();
+      // Automatische Überschrift (aus den Bibelstellen) folgt den Blöcken – eine selbst geschriebene bleibt
+      const auto = n.autoTitle !== undefined ? n.title === n.autoTitle : !!n.title && n.title === titleFromRefs(oldRefs);
+      if (auto) {
+        const t = titleFromRefs(n.refs);
+        n.title = t;
+        n.autoTitle = t;
+        if (this.el.title.value.trim() !== t) this.el.title.value = t;
+      }
     }
     if (this.dirtyInk || !n.ink) {
       // Zeichnung als ein Datenblock statt hunderttausender Einzelzahlen (viel schneller zu speichern)
@@ -2135,6 +2144,22 @@ function snapToPaper(kind, poly, paper) {
   let x0 = sx(Math.min(...xs)), x1 = sx(Math.max(...xs)), y0 = sy(Math.min(...ys)), y1 = sy(Math.max(...ys));
   if (x0 === x1 || y0 === y1) return null;
   return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+}
+
+/** Überschrift aus den Bibelstellen einer Notiz, z. B. „Johannes 3,16.18; Römer 8,28“ */
+export function titleFromRefs(refs) {
+  const out = [];
+  let i = 0;
+  while (i < refs.length) {
+    const r = refs[i];
+    const vs = [];
+    while (i < refs.length && refs[i].book === r.book && refs[i].chapter === r.chapter) {
+      const q = refs[i++];
+      vs.push(q.vs === q.ve ? `${q.vs}` : `${q.vs}-${q.ve}`);
+    }
+    out.push([formatRef({ book: r.book, chapter: r.chapter, vs: r.vs, ve: r.ve }), ...vs.slice(1)].join('.'));
+  }
+  return out.join('; ');
 }
 
 /** Punkte in gleichmäßigem Abstand neu abtasten (glättet das Zittern vieler Stiftpunkte) */

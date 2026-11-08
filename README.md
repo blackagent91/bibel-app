@@ -50,6 +50,9 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
   auf Linienpapier legen sich waagerechte Linien auf die Papierlinie.
 - **Linie verlängern:** Eine neue Linie auf derselben Spur, die an eine vorhandene anschließt oder sie überlappt,
   wird mit ihr zu einer durchgehenden Linie verbunden.
+- **Automatische Überschrift:** Eine aus der Bibel erstellte Notiz heißt wie ihre Bibelstellen und passt sich an,
+  wenn Stellen dazukommen oder entfernt werden (eine selbst geschriebene Überschrift bleibt). Wird die letzte Stelle
+  entfernt und steht sonst nichts in der Notiz, wird die Notiz automatisch gelöscht.
 - **Verschieben:** Stift auf einer Form oder einem Strich gut eine halbe Sekunde ruhig halten, dann ziehen.
   Umrahmtes (Kreis, Viereck, freie Schleife) wird samt Inhalt verschoben.
 - **Bibeltext in Notizen markieren:** mit Pencil oder Finger über die Wörter fahren (Finger: seitlich =

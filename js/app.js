@@ -3,7 +3,7 @@ import { db, uid } from './db.js';
 import { BOOKS, getBook, formatRef, compareRefs } from './books.js';
 import { loadImported, listTranslations, getTranslation, importBibleFile, deleteImported } from './translations.js';
 import { BibleView } from './bible.js';
-import { NotesEditor, unpackStrokes } from './notes.js';
+import { NotesEditor, unpackStrokes, titleFromRefs } from './notes.js';
 import { $, $$, esc, toast, formatDate, dayKey, dayLabel } from './util.js';
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '43 · 08.11.2026';
+export const APP_VERSION = '44 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -113,6 +113,7 @@ async function persistNote(n) {
     if (state.notes.has(n.id)) {
       state.notes.delete(n.id);
       await db.del('notes', n.id);
+      toast('Notiz war leer und wurde entfernt');
     }
   } else {
     state.notes.set(n.id, n);
@@ -186,7 +187,10 @@ async function deleteNoteRef(noteId, idx) {
     tpl.innerHTML = n.html || '';
     tpl.content.querySelectorAll('.scripture')[idx]?.remove();
     n.html = tpl.innerHTML;
+    const oldRefs = n.refs;
     n.refs = n.refs.filter((_, i) => i !== idx);
+    const auto = n.autoTitle !== undefined ? n.title === n.autoTitle : !!n.title && n.title === titleFromRefs(oldRefs);
+    if (auto) n.title = n.autoTitle = titleFromRefs(n.refs);
     n.updated = Date.now();
     await persistNote(n);
     toast('Bibelstelle aus der Notiz entfernt');
@@ -211,6 +215,7 @@ function handleBibleAction(sel, act, extra) {
   if (act === 'new') {
     if (state.focus === 'bible') setFocus(null);
     const n = createNote(sel.label || formatRef(sel));
+    n.autoTitle = n.title; // Überschrift passt sich den Bibelstellen an, bis man sie selbst ändert
     for (const p of parts) editor.insertScripture(p, { color: 'yellow' });
     bible.clearSelection();
     showPane('notes');
