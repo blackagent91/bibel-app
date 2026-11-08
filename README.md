@@ -19,7 +19,16 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 - **Ziehen**: gedrückt halten und auf das Notizfeld ziehen (Maus, Finger oder Pencil)
 - **Markieren**: farbig markieren, ohne Notiz
 
-**Notizen (links)**
+**Seiten tauschen**
+- Unten am Trennstrich sitzt ein Griff **⇄**: antippen oder zur Seite ziehen, dann tauschen
+  Notizen und Bibel die Seiten (z. B. für Rechtshänder Notizen rechts). Auch in den Einstellungen unter „Anordnung“.
+
+**Bibel lesen ohne Verrutschen**
+- Die Bibelseite scrollt nur hoch und runter. Kein seitliches Verschieben, kein Hineinzoomen,
+  der Text steht immer sauber in der Spalte.
+- **Zwei Finger auseinander/zusammen** = Schrift größer/kleiner (der Text bricht sauber neu um).
+
+**Notizen**
 - Modus **Text**: Titel, Überschriften, Schriftgröße A−/A+, fett/kursiv/unterstrichen,
   Textmarker, Schriftfarbe, Listen, Checklisten, Zitate, farbige **Blöcke**, Trennlinien
 - Blöcke (Bibelstellen, farbige Blöcke, Zitate) lassen sich verschieben (↑ ↓), umfärben,

@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -129,7 +129,7 @@
             <input id="note-title" class="note-title" placeholder="Titel der Notiz" autocomplete="off" />
             <div class="note-meta" id="note-meta"></div>
             <div id="editor" class="editor" contenteditable="true" spellcheck="true"
-                 data-placeholder="Schreib los … oder markiere rechts eine Bibelstelle und zieh sie hierher."></div>
+                 data-placeholder="Schreib los … oder markiere eine Bibelstelle und zieh sie hierher."></div>
             <div class="drop-hint" id="drop-hint">Hier ablegen</div>
           </div>
         </div>
@@ -170,6 +170,9 @@
     <!-- ============ TRENNER ============ -->
     <div class="divider" id="divider" role="separator" aria-orientation="vertical" title="Ziehen zum Anpassen">
       <span></span>
+      <button class="swap-btn" id="swap-btn" title="Seiten tauschen (antippen oder zur Seite ziehen)" aria-label="Seiten tauschen">
+        <svg viewBox="0 0 24 24"><path d="M7 7h13M16 3l4 4-4 4M17 17H4M8 13l-4 4 4 4"/></svg>
+      </button>
     </div>
 
     <!-- ============ RECHTS: BIBEL ============ -->
@@ -280,6 +283,12 @@
           <label class="row">Schriftgröße Notizen
             <input type="range" id="set-note-size" min="13" max="26" step="1" />
             <output id="out-note-size"></output>
+          </label>
+          <label class="row">Anordnung
+            <select id="set-swap" class="tool-select">
+              <option value="0">Notizen links · Bibel rechts</option>
+              <option value="1">Bibel links · Notizen rechts</option>
+            </select>
           </label>
           <label class="row">Bibeltext
             <select id="set-layout" class="tool-select">

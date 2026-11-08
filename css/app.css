@@ -64,7 +64,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   height: 100dvh;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
 }
-.pane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.pane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); overflow: hidden; }
 
 .divider {
   position: relative;
@@ -76,6 +76,22 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .divider::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--line); }
 .divider span { position: relative; width: 4px; height: 44px; border-radius: 4px; background: var(--line-2); transition: background .15s; }
 .divider:hover span, .divider.dragging span { background: var(--accent); }
+
+/* Seiten tauschen */
+.app.swapped { grid-template-columns: minmax(300px, 1fr) 10px minmax(280px, var(--split)); }
+.app.swapped .bible-pane { grid-column: 1; grid-row: 1; }
+.app.swapped .divider { grid-column: 2; grid-row: 1; }
+.app.swapped .notes-pane { grid-column: 3; grid-row: 1; }
+.swap-btn {
+  position: absolute; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  z-index: 12; width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-2); border: 1px solid var(--line-2); color: var(--text-2);
+  box-shadow: 0 6px 20px rgba(0,0,0,.6); touch-action: none; cursor: grab;
+}
+.swap-btn svg { width: 18px; height: 18px; }
+.swap-btn:hover, .swap-btn.active { color: var(--accent); border-color: var(--accent); }
+.app.swapping .pane { transition: opacity .15s; opacity: .35; }
 
 .pane-head {
   flex: none;
@@ -351,7 +367,12 @@ body.inking .bible-pane, body.inking .sel-menu { pointer-events: none; }
 .ref-btn:hover { background: var(--bg-3); }
 .trans-select { max-width: 150px; }
 
-.bible-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.bible-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+  touch-action: pan-y; overscroll-behavior: contain;
+}
+.bible-text { overflow-wrap: break-word; }
+.note-scroll { overflow-x: hidden; }
 .bible-text {
   max-width: 720px; margin: 0 auto; padding: 28px 30px 10px;
   font-family: var(--bible-font); font-size: var(--bible-size); line-height: 1.75; color: var(--text);
@@ -516,9 +537,9 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 
 /* ================= Schmale Bildschirme ================= */
 @media (max-width: 760px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .app, .app.swapped { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
   .divider { display: none; }
-  .pane { grid-column: 1; grid-row: 1; }
+  .pane, .app.swapped .pane { grid-column: 1; grid-row: 1; }
   .app[data-show="notes"] .bible-pane, .app[data-show="bible"] .notes-pane { display: none; }
   .mobile-tabs {
     display: flex; grid-row: 2; border-top: 1px solid var(--line); background: var(--bg);

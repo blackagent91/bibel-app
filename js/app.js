@@ -24,8 +24,8 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '15 · 08.11.2026';
-const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on' };
+export const APP_VERSION = '17 · 08.11.2026';
+const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
 function readLS(key, fallback) {
@@ -308,7 +308,7 @@ function renderDrawer() {
       return hay.includes(q);
     });
     if (!notes.length) {
-      list.innerHTML = `<div class="empty">${q || state.dayFilter || state.bookFilter ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere rechts eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
+      list.innerHTML = `<div class="empty">${q || state.dayFilter || state.bookFilter ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
       return;
     }
     // Buchfilter: zum Durchgehen in Bibelreihenfolge statt nach Datum
@@ -451,7 +451,8 @@ function bindLayout() {
     div.classList.add('dragging');
     const r = app.getBoundingClientRect();
     const move = (ev) => {
-      const pct = Math.min(75, Math.max(25, ((ev.clientX - r.left) / r.width) * 100));
+      let pct = Math.min(75, Math.max(25, ((ev.clientX - r.left) / r.width) * 100));
+      if (settings.swap === '1') pct = 100 - pct; // Notizen rechts: Breite von rechts gemessen
       settings.split = Math.round(pct * 10) / 10;
       app.style.setProperty('--split', `${settings.split}%`);
     };
@@ -463,6 +464,32 @@ function bindLayout() {
     };
     div.addEventListener('pointermove', move);
     div.addEventListener('pointerup', up);
+  });
+  // Seiten tauschen: Griff antippen oder zur Seite ziehen
+  const swap = $('#swap-btn');
+  swap.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation(); // nicht die Breite verstellen
+    capture(swap, e.pointerId);
+    swap.classList.add('active');
+    const x0 = e.clientX;
+    let done = false;
+    const move = (ev) => {
+      if (!done && Math.abs(ev.clientX - x0) > 50) {
+        done = true;
+        toggleSwap();
+      }
+    };
+    const up = () => {
+      swap.classList.remove('active');
+      swap.removeEventListener('pointermove', move);
+      swap.removeEventListener('pointerup', up);
+      swap.removeEventListener('pointercancel', up);
+      if (!done) toggleSwap(); // einfacher Tipp
+    };
+    swap.addEventListener('pointermove', move);
+    swap.addEventListener('pointerup', up);
+    swap.addEventListener('pointercancel', up);
   });
   div.addEventListener('dblclick', () => {
     settings.split = 50;
@@ -485,7 +512,29 @@ function bindLayout() {
 // ---------------------------------------------------------------------------
 // Einstellungen
 // ---------------------------------------------------------------------------
+function capture(el, id) {
+  try {
+    el.setPointerCapture(id);
+  } catch {}
+}
+
+function applySwap() {
+  app.classList.toggle('swapped', settings.swap === '1');
+}
+
+function toggleSwap() {
+  settings.swap = settings.swap === '1' ? '0' : '1';
+  app.classList.add('swapping');
+  setTimeout(() => {
+    applySwap();
+    app.classList.remove('swapping');
+  }, 120);
+  saveSettings();
+  toast(settings.swap === '1' ? 'Notizen rechts · Bibel links' : 'Notizen links · Bibel rechts', 1600);
+}
+
 function applySettings() {
+  applySwap();
   document.documentElement.style.setProperty('--bible-size', `${settings.bibleSize}px`);
   document.documentElement.style.setProperty('--note-size', `${settings.noteSize}px`);
   bible.setLayout(settings.layout, settings.font);
@@ -517,6 +566,7 @@ function bindSettings() {
     $('#set-layout').value = settings.layout;
     $('#set-font').value = settings.font;
     $('#set-xrefs').value = settings.xrefs;
+    $('#set-swap').value = settings.swap;
     renderTranslations();
     modal.classList.remove('hidden');
   };
@@ -534,6 +584,7 @@ function bindSettings() {
   bindInput('#set-layout', 'layout', false);
   bindInput('#set-font', 'font', false);
   bindInput('#set-xrefs', 'xrefs', false);
+  bindInput('#set-swap', 'swap', false);
 
   $('#translation').addEventListener('change', async (e) => {
     settings.trans = e.target.value;
@@ -688,6 +739,16 @@ const bible = new BibleView({
   onAction: handleBibleAction,
   onOpenNote: (id, opts) => openNote(id, opts),
   onNavigate: (pos) => writeLS('position', pos),
+  getBibleSize: () => settings.bibleSize,
+  onBibleSize: (px, final) => {
+    settings.bibleSize = px;
+    document.documentElement.style.setProperty('--bible-size', `${px}px`);
+    if (final) {
+      saveSettings();
+      $('#out-bible-size').textContent = px;
+      toast(`Schriftgröße Bibel: ${px}`, 1200);
+    }
+  },
   toast,
 });
 

@@ -436,6 +436,43 @@ export class BibleView {
 
     this.bindToc();
     this.bindSearch();
+    this.bindPinch();
+  }
+
+  /**
+   * Zwei Finger auseinander/zusammen = Schrift größer/kleiner. Der Browser-Zoom ist auf der
+   * Bibelseite gesperrt, damit der Text immer sauber in der Spalte steht.
+   */
+  bindPinch() {
+    const el = this.el.scroll;
+    let pinch = null;
+    const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    el.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        pinch = { d: dist(e.touches), size: this.o.getBibleSize?.() || 19, last: null };
+        e.preventDefault();
+      }
+    }, { passive: false });
+    el.addEventListener('touchmove', (e) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      const size = Math.max(14, Math.min(30, Math.round(pinch.size * (dist(e.touches) / pinch.d))));
+      if (size !== pinch.last) {
+        pinch.last = size;
+        this.o.onBibleSize?.(size, false);
+      }
+    }, { passive: false });
+    const end = (e) => {
+      if (!pinch || e.touches.length >= 2) return;
+      if (pinch.last && pinch.last !== pinch.size) this.o.onBibleSize?.(pinch.last, true);
+      pinch = null;
+    };
+    el.addEventListener('touchend', end);
+    el.addEventListener('touchcancel', end);
+    // Safari: eigene Zoom-Geste unterdrücken
+    for (const type of ['gesturestart', 'gesturechange']) {
+      document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+    }
   }
 
   setSelection(vs, ve, native = false) {
