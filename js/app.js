@@ -17,6 +17,7 @@ const state = {
   dayFilter: null, // "2026-11-08" oder null = alle Tage
   bookFilter: null, // Buch-ID oder null = alle Bücher
   filterMode: 'day', // welche Filterleiste gerade sichtbar ist
+  focus: null, // Vollbild: 'notes' | 'bible' | null (geteilt)
 };
 
 /** Tage, an denen an einer Notiz gearbeitet wurde */
@@ -24,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '24 · 08.11.2026';
+export const APP_VERSION = '25 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -172,6 +173,7 @@ function handleBibleAction(sel, act, extra) {
     return setHighlight(sel, extra);
   }
   if (act === 'new') {
+    if (state.focus === 'bible') setFocus(null);
     const n = createNote(formatRef(sel));
     editor.insertScripture(sel, { color: 'yellow' });
     bible.clearSelection();
@@ -474,6 +476,11 @@ function bindLayout() {
     div.addEventListener('pointerup', up);
     div.addEventListener('pointercancel', up);
   });
+  // Vollbild-Knöpfe und Umschalter
+  $$('.focus-btn').forEach((b) => (b.onclick = () => setFocus(state.focus === b.dataset.focus ? null : b.dataset.focus)));
+  $('#focus-switch').onclick = () => setFocus(state.focus === 'notes' ? 'bible' : 'notes');
+  window.matchMedia('(max-width: 760px)').addEventListener?.('change', () => state.focus && setFocus(null));
+
   // Seiten tauschen: Griff antippen oder zur Seite ziehen
   const swap = $('#swap-btn');
   swap.addEventListener('pointerdown', (e) => {
@@ -525,6 +532,22 @@ function capture(el, id) {
   try {
     el.setPointerCapture(id);
   } catch {}
+}
+
+/** Vollbild für eine Seite (oder zurück zur geteilten Ansicht mit null) */
+function setFocus(which) {
+  if (isNarrow()) which = null; // auf dem Handy gibt es ohnehin nur eine Seite
+  state.focus = which;
+  app.classList.toggle('focus-notes', which === 'notes');
+  app.classList.toggle('focus-bible', which === 'bible');
+  const sw = $('#focus-switch');
+  sw.classList.toggle('hidden', !which);
+  $('#focus-switch-label').textContent = which === 'notes' ? 'Zur Bibel' : 'Zu den Notizen';
+  $$('.focus-btn').forEach((b) => {
+    const on = state.focus === b.dataset.focus;
+    b.title = on ? 'Vollbild beenden' : b.dataset.focus === 'notes' ? 'Notizen im Vollbild' : 'Bibel im Vollbild';
+  });
+  bible.positionMenu?.();
 }
 
 function applySwap() {
@@ -742,6 +765,7 @@ function bindSettings() {
 const editor = new NotesEditor({
   onSave: persistNote,
   onJump: (ref) => {
+    if (state.focus === 'notes') setFocus(null);
     bible.goto(ref);
     if (isNarrow()) showPane('bible');
   },

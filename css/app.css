@@ -677,3 +677,23 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
   -webkit-user-select: text; user-select: text; outline: none; caret-color: transparent; cursor: text;
 }
 .scripture-text span[style*="background"] { border-radius: 3px; padding: 0 1px; }
+
+/* Vollbild: nur Notizen oder nur Bibel */
+.focus-btn .ic-collapse { display: none; }
+.app.focus-notes .focus-btn .ic-expand, .app.focus-bible .focus-btn .ic-expand { display: none; }
+.app.focus-notes .focus-btn .ic-collapse, .app.focus-bible .focus-btn .ic-collapse { display: block; }
+.app.focus-notes, .app.focus-bible, .app.swapped.focus-notes, .app.swapped.focus-bible { grid-template-columns: 1fr; }
+.app.focus-notes .bible-pane, .app.focus-notes .divider,
+.app.focus-bible .notes-pane, .app.focus-bible .divider { display: none; }
+.app.focus-notes .notes-pane, .app.focus-bible .bible-pane { grid-column: 1; grid-row: 1; }
+.focus-switch {
+  position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 40;
+  display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; border-radius: 21px;
+  background: var(--bg-2); border: 1px solid var(--line-2); color: var(--text); font-size: 14px; font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0,0,0,.6);
+}
+.focus-switch svg { width: 17px; height: 17px; color: var(--accent); }
+.focus-switch:hover { border-color: var(--accent); }
+@media (max-width: 760px) {
+  .focus-btn, .focus-switch { display: none !important; }
+}

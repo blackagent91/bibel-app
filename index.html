@@ -109,6 +109,10 @@
           <button class="icon-btn" id="btn-new-note" title="Neue Notiz" aria-label="Neue Notiz">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
           </button>
+          <button class="icon-btn focus-btn" data-focus="notes" title="Notizen im Vollbild" aria-label="Notizen im Vollbild">
+            <svg class="ic-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            <svg class="ic-collapse" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+          </button>
           <button class="icon-btn" id="btn-settings" title="Einstellungen" aria-label="Einstellungen">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
           </button>
@@ -259,6 +263,10 @@
           </button>
           <span class="spacer"></span>
           <select id="translation" class="tool-select trans-select" title="Übersetzung"></select>
+          <button class="icon-btn focus-btn" data-focus="bible" title="Bibel im Vollbild" aria-label="Bibel im Vollbild">
+            <svg class="ic-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            <svg class="ic-collapse" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+          </button>
           <button class="icon-btn" id="btn-search" title="In der Bibel suchen" aria-label="Suchen">
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
           </button>
@@ -301,6 +309,12 @@
         <div class="search-results" id="search-results"></div>
       </div>
     </section>
+
+    <!-- Im Vollbild: zur anderen Seite wechseln -->
+    <button class="focus-switch hidden" id="focus-switch">
+      <svg viewBox="0 0 24 24"><path d="M7 7h13M16 3l4 4-4 4M17 17H4M8 13l-4 4 4 4"/></svg>
+      <span id="focus-switch-label">Zur Bibel</span>
+    </button>
 
     <!-- Mobile Umschalter -->
     <nav class="mobile-tabs" id="mobile-tabs">
