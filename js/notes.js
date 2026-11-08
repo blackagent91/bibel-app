@@ -25,7 +25,9 @@ const PALM_GRACE_MS = 900; // so lange nach dem Stift werden Berührungen der Ha
 const MIN_VERTICAL_REVERSALS = 6; // ab 3 Bögen (Ab-Auf-Ab-Auf…) gilt Hoch-runter-Kritzeln als Löschen
 const MIN_HORIZONTAL_REVERSALS = 3;
 const FADE_MS = 380;
-const PALM_SIZE = 40; // Kontaktfläche (px), ab der eine Berührung als Handballen gilt
+const PALM_SIZE = 40;
+const HOLD_MS = 550; // so lange den Stift ruhig halten, damit eine Form einrastet
+const AUTO_SHAPE_SIZE = 75; // ab dieser Größe (px Diagonale) werden Formen automatisch erkannt // Kontaktfläche (px), ab der eine Berührung als Handballen gilt
 
 /** HTML eines Bibelstellen-Blocks */
 export function scriptureHTML(p, color = 'yellow') {
@@ -498,6 +500,16 @@ export class NotesEditor {
     window.addEventListener('pointercancel', up, true);
   }
 
+  /** Eine Markierung im Bibeltext komplett entfernen */
+  unmarkSpan(text, span) {
+    this.structural(() => {
+      while (span.firstChild) span.before(span.firstChild);
+      span.remove();
+      text.normalize();
+    });
+    this.changed();
+  }
+
   /** Bibelstellen-Block entfernen (Rückgängig holt ihn zurück) */
   removeScripture(block) {
     if (!block) return;
@@ -659,6 +671,11 @@ export class NotesEditor {
       if (e.target.closest('.scripture-remove')) {
         e.preventDefault();
         this.removeScripture(block);
+        return;
+      }
+      const hlSpan = e.target.closest('.scripture-text span[style*="background"]');
+      if (hlSpan && block?.hasAttribute('data-open') && window.getSelection().isCollapsed) {
+        this.unmarkSpan(block.querySelector('.scripture-text'), hlSpan);
         return;
       }
       const toggle = e.target.closest('.scripture-toggle');
@@ -1218,9 +1235,18 @@ class Ink {
         const palm = (e.width || 0) > PALM_SIZE || (e.height || 0) > PALM_SIZE;
         if (palm || this.penActive()) return; // Handballen ignorieren
         if (this.pencilOnly) {
+          capture(c, e.pointerId);
+          const fhit = this.ed.hitScripture(e.clientX, e.clientY);
+          if (fhit?.kind === 'text' && !this.current) {
+            // Finger auf Bibeltext: Richtung entscheidet – seitlich = markieren, senkrecht = scrollen
+            this.current = {
+              mark: true, pending: true, finger: true, id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: Date.now(),
+              top: this.ed.el.scroll.scrollTop, text: fhit.block.querySelector('.scripture-text'), remove: false,
+            };
+            return;
+          }
           // Finger scrollt, Pencil zeichnet
           this.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), top: this.ed.el.scroll.scrollTop };
-          capture(c, e.pointerId);
           return;
         }
       }
@@ -1242,7 +1268,6 @@ class Ink {
           mark: true, id: e.pointerId, pen: isPen, x0: e.clientX, y0: e.clientY,
           text: hit.block.querySelector('.scripture-text'), remove: this.tool === 'eraser',
         };
-        this.previewMark(e.clientX, e.clientY);
         return;
       }
       const [x, y] = this.toPage(e);
@@ -1275,9 +1300,24 @@ class Ink {
       if (cur.pen) this.lastPen = Date.now();
       if (cur.tap) return;
       if (cur.mark) {
+        if (cur.pending) {
+          const dx = Math.abs(e.clientX - cur.x0);
+          const dy = Math.abs(e.clientY - cur.y0);
+          if (dy > 10 && dy > dx) {
+            // senkrecht -> doch scrollen
+            this.current = null;
+            this.pan = { id: cur.id, x: cur.x0, y: cur.y0, t: 0, top: cur.top };
+            this.ed.el.scroll.scrollTop = cur.top - (e.clientY - cur.y0);
+            return;
+          }
+          if (dx <= 8) return;
+          cur.pending = false;
+        }
+        if (Math.abs(e.clientX - cur.x0) + Math.abs(e.clientY - cur.y0) > 6) cur.moved = true;
         this.previewMark(e.clientX, e.clientY);
         return;
       }
+      if (cur.snapped) return; // Form ist schon eingerastet
       const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       const p = cur.s ? cur.s.p : null;
       for (const ev of events.length ? events : [e]) {
@@ -1292,7 +1332,14 @@ class Ink {
         const pr = ev.pointerType === 'pen' ? ev.pressure || 0.5 : 0.5;
         p.push(r1(x), r1(y), r2(pr));
       }
-      if (!cur.eraser) this.scheduleLive();
+      if (!cur.eraser) {
+        this.scheduleLive();
+        // Stift kurz ruhig halten -> Form erkennen und einrasten
+        clearTimeout(this.holdTimer);
+        this.holdTimer = setTimeout(() => {
+          if (this.current === cur && !cur.snapped) this.snapShape(cur, true);
+        }, HOLD_MS);
+      }
     });
 
     const end = (e) => {
@@ -1318,7 +1365,14 @@ class Ink {
       }
       if (cur.mark) {
         this.clearLive();
-        const r = e.type === 'pointerup' && this.markRange(cur, e.clientX, e.clientY);
+        if (e.type !== 'pointerup') return;
+        const tapped = !cur.moved && Math.abs(e.clientX - cur.x0) < 8 && Math.abs(e.clientY - cur.y0) < 8;
+        if (tapped) {
+          // Tipp: markiertes Wort -> Markierung weg, unmarkiertes Wort -> markieren
+          this.toggleWordAt(cur.text, e.clientX, e.clientY, cur.remove);
+          return;
+        }
+        const r = this.markRange(cur, e.clientX, e.clientY);
         if (r) this.ed.markWords(cur.text, r, cur.remove ? null : markerColorFor(this.color));
         return;
       }
@@ -1327,10 +1381,12 @@ class Ink {
         else this.ed.changed('ink');
         return;
       }
+      clearTimeout(this.holdTimer);
+      if (!cur.snapped && e.type === 'pointerup') this.snapShape(cur, false);
       cancelAnimationFrame(this.liveRaf);
       this.liveRaf = 0;
       this.clearLive();
-      if (cur.s.t === 'pen' && this.scratchOut(cur.s)) {
+      if (cur.s.t === 'pen' && !cur.snapped && this.scratchOut(cur.s)) {
         toast('Durchgestrichenes gelöscht · Rückgängig mit 2-Finger-Tipp');
         this.changed(); // ganze Zeichnung neu (Teile wurden gelöscht)
         return;
@@ -1450,6 +1506,41 @@ class Ink {
     this.geo = null;
     this.schedule();
     if (this.current) this.scheduleLive(true);
+  }
+
+  /**
+   * Form erkennen und den Strich durch die saubere Form ersetzen.
+   * @param {boolean} held true = Stift wurde am Ende ruhig gehalten (dann auch kleine Formen)
+   */
+  snapShape(cur, held) {
+    if (!cur?.s || cur.s.p.length < 15) return false;
+    const shape = recognizeShape(cur.s.p, held ? 0 : AUTO_SHAPE_SIZE);
+    if (!shape) return false;
+    cur.s.p = shape.points;
+    cur.snapped = shape.kind;
+    if (cur.s.t === 'marker') this.schedule(); // Marker-Ebene komplett neu
+    else this.scheduleLive(true);
+    return true;
+  }
+
+  /** Tipp auf ein Wort im Bibeltext: Markierung entfernen bzw. Wort markieren */
+  toggleWordAt(text, x, y, removeOnly = false) {
+    const c = this.canvas;
+    const prev = c.style.pointerEvents;
+    c.style.pointerEvents = 'none';
+    try {
+      const el = document.elementFromPoint(x, y);
+      const span = el?.closest?.('span[style*="background"]');
+      if (span && text.contains(span)) {
+        this.ed.unmarkSpan(text, span);
+        return;
+      }
+      if (removeOnly) return;
+      const r = this.ed.wordRange(text, x, y, x, y);
+      if (r) this.ed.markWords(text, r, markerColorFor(this.color));
+    } finally {
+      c.style.pointerEvents = prev;
+    }
   }
 
   /** Wortbereich vom Start- bis zum aktuellen Punkt (Zeichenfläche dafür kurz durchlässig machen) */
@@ -1658,6 +1749,140 @@ function upgradeScriptureBlocks(root) {
       t.removeAttribute('spellcheck');
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Formerkennung: Linie, Dreieck, Viereck, Kreis/Ellipse
+// ---------------------------------------------------------------------------
+/**
+ * @param {number[]} p Punkte [x, y, Druck, …]
+ * @param {number} minSize kleinste Diagonale, ab der erkannt wird (0 = jede Größe)
+ * @returns {{kind: string, points: number[]} | null}
+ */
+export function recognizeShape(p, minSize = 0) {
+  const pts = [];
+  let pr = 0;
+  for (let i = 0; i < p.length; i += 3) { pts.push([p[i], p[i + 1]]); pr += p[i + 2]; }
+  pr = Math.round((pr / pts.length) * 100) / 100;
+  const n = pts.length;
+  if (n < 5) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, len = 0;
+  pts.forEach(([x, y], i) => {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    if (i) len += Math.hypot(x - pts[i - 1][0], y - pts[i - 1][1]);
+  });
+  const w = maxX - minX, h = maxY - minY, diag = Math.hypot(w, h);
+  if (diag < Math.max(minSize, 18)) return null;
+  const A = pts[0], Z = pts[n - 1];
+  const chord = Math.hypot(Z[0] - A[0], Z[1] - A[1]);
+  const out = (kind, poly, closed) => ({ kind, points: densify(poly, closed, pr) });
+
+  // --- gerade Linie
+  if (chord > 0.8 * len) {
+    const maxDev = Math.max(...pts.map(([x, y]) => distToSeg(x, y, A, Z)));
+    if (maxDev <= Math.max(3.5, chord * 0.05)) {
+      let a = A, z = Z;
+      const ang = (Math.atan2(z[1] - a[1], z[0] - a[0]) * 180) / Math.PI;
+      const near = (t) => Math.abs(((ang - t + 540) % 360) - 180) < 8;
+      if (near(0) || near(180)) z = [z[0], a[1]]; // waagerecht
+      else if (near(90) || near(-90)) z = [a[0], z[1]]; // senkrecht
+      return out('line', [a, z], false);
+    }
+    return null;
+  }
+
+  // --- geschlossene Formen
+  if (chord > Math.max(24, 0.3 * diag) || len < 2.2 * diag * 0.9) return null;
+  const poly = cornersOf(pts, diag);
+  if (poly.length === 3) return out('triangle', poly, true);
+  if (poly.length === 4) {
+    const angles = poly.map((q, i) => angleAt(poly[(i + 3) % 4], q, poly[(i + 1) % 4]));
+    if (angles.every((g) => Math.abs(g - 90) < 25)) {
+      // fast achsenparallel -> sauberes Rechteck
+      const tilt = (Math.atan2(poly[1][1] - poly[0][1], poly[1][0] - poly[0][0]) * 180) / Math.PI;
+      const t = ((tilt % 90) + 90) % 90;
+      if (t < 12 || t > 78) return out('rect', [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]], true);
+      return out('rect', poly, true);
+    }
+  }
+  // Kreis/Ellipse: Abstand der Punkte zur Ellipse durch den Rahmen
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, rx = w / 2, ry = h / 2;
+  if (rx < 6 || ry < 6) return null;
+  const err = pts.reduce((s, [x, y]) => s + Math.abs(Math.hypot((x - cx) / rx, (y - cy) / ry) - 1), 0) / n;
+  if (err < 0.13) {
+    const round = Math.abs(rx - ry) / Math.max(rx, ry) < 0.18;
+    const r = (rx + ry) / 2;
+    const RX = round ? r : rx, RY = round ? r : ry;
+    const steps = Math.max(32, Math.round((Math.PI * (RX + RY)) / 4));
+    const ring = [];
+    for (let i = 0; i <= steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      ring.push([cx + RX * Math.cos(a), cy + RY * Math.sin(a)]);
+    }
+    return { kind: round ? 'circle' : 'ellipse', points: ring.flatMap(([x, y]) => [r1(x), r1(y), pr]) };
+  }
+  return null;
+}
+
+function distToSeg(x, y, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const l2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2));
+  return Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy));
+}
+
+function angleAt(a, b, c) {
+  const v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]];
+  const d = (v1[0] * v2[0] + v1[1] * v2[1]) / ((Math.hypot(...v1) * Math.hypot(...v2)) || 1);
+  return (Math.acos(Math.max(-1, Math.min(1, d))) * 180) / Math.PI;
+}
+
+/** Ecken einer geschlossenen Form (Douglas-Peucker + fast gerade Ecken entfernen) */
+function cornersOf(pts, diag) {
+  const eps = diag * 0.07;
+  const rdp = (arr) => {
+    if (arr.length < 3) return arr;
+    const a = arr[0], z = arr[arr.length - 1];
+    let idx = 0, md = 0;
+    for (let i = 1; i < arr.length - 1; i++) {
+      const d = distToSeg(arr[i][0], arr[i][1], a, z);
+      if (d > md) { md = d; idx = i; }
+    }
+    if (md <= eps) return [a, z];
+    return [...rdp(arr.slice(0, idx + 1)).slice(0, -1), ...rdp(arr.slice(idx))];
+  };
+  // am weitesten vom Start entfernten Punkt teilen, damit die Form sauber in zwei Hälften zerfällt
+  let far = 0, fd = 0;
+  pts.forEach(([x, y], i) => { const d = Math.hypot(x - pts[0][0], y - pts[0][1]); if (d > fd) { fd = d; far = i; } });
+  let poly = [...rdp(pts.slice(0, far + 1)).slice(0, -1), ...rdp([...pts.slice(far), pts[0]]).slice(0, -1)];
+  // Ecken mit fast gestrecktem Winkel und zu nahe Punkte entfernen
+  let changed = true;
+  while (changed && poly.length > 2) {
+    changed = false;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[(i - 1 + poly.length) % poly.length], b = poly[i], c = poly[(i + 1) % poly.length];
+      if (angleAt(a, b, c) > 150 || Math.hypot(b[0] - a[0], b[1] - a[1]) < diag * 0.12) {
+        poly.splice(i, 1);
+        changed = true;
+        break;
+      }
+    }
+  }
+  return poly;
+}
+
+/** Form in dichte Punkte umwandeln (für Radierer und gleichmäßiges Zeichnen) */
+function densify(poly, closed, pr) {
+  const out = [];
+  const pts = closed ? [...poly, poly[0]] : poly;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+    const steps = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / 4));
+    for (let k = 0; k < steps; k++) out.push(r1(x0 + ((x1 - x0) * k) / steps), r1(y0 + ((y1 - y0) * k) / steps), pr);
+  }
+  const last = pts[pts.length - 1];
+  out.push(r1(last[0]), r1(last[1]), pr);
+  return out;
 }
 
 /** Stiftfarbe -> passende Textmarker-Farbe für Wörter im Bibeltext */

@@ -43,6 +43,11 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 - Modus **Stift**: frei schreiben und zeichnen mit dem Apple Pencil (druckempfindlich),
   Textmarker, Radierer, Farben, Strichstärken.
   „Nur Pencil“: Der Stift zeichnet, mit dem Finger scrollst du.
+- **Formen erkennen:** gerade Linien, Dreiecke, Vierecke, Kreise und Ellipsen werden begradigt –
+  große automatisch, kleine, wenn man den Stift am Ende kurz ruhig hält. Fast waagerechte/senkrechte
+  Linien rasten exakt ein (auch mit dem Textmarker zum Unterstreichen).
+- **Bibeltext in Notizen markieren:** mit Pencil oder Finger über die Wörter fahren (Finger: seitlich =
+  markieren, senkrecht = scrollen); ein Tipp auf ein markiertes Wort entfernt die Markierung.
 - **Durchkritzeln zum Löschen:** Kritzelst du im Zickzack über Geschriebenes, wird es gelöscht.
 - **Handballen-Erkennung:** Im Stift-Modus öffnet die aufliegende Hand kein Kopieren-Menü und
   zeichnet nicht mit. Sobald der Apple Pencil erkannt wird, zeichnet nur noch der Stift.
