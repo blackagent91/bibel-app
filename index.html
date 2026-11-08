@@ -84,6 +84,20 @@
               <svg viewBox="0 0 24 24"><path d="M15 4l5 5L9 20H4v-5L15 4z"/></svg><span>Stift</span>
             </button>
           </div>
+          <div class="paper-switch" id="paper-switch" role="group" aria-label="Papier">
+            <button data-paper="clean" title="Leer" aria-label="Leeres Papier">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            </button>
+            <button data-paper="dots" title="Punkte" aria-label="Punktraster">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><g fill="currentColor" stroke="none"><circle cx="9" cy="9" r="1.2"/><circle cx="15" cy="9" r="1.2"/><circle cx="9" cy="15" r="1.2"/><circle cx="15" cy="15" r="1.2"/></g></svg>
+            </button>
+            <button data-paper="grid" title="Kästchen" aria-label="Kästchen">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16" stroke-width="1.2"/></svg>
+            </button>
+            <button data-paper="lines" title="Linien" aria-label="Linien">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9.5h16M4 14.5h16" stroke-width="1.2"/></svg>
+            </button>
+          </div>
           <span class="spacer"></span>
           <span class="save-state" id="save-state"></span>
           <button class="icon-btn" id="btn-undo" title="Rückgängig (Tipp mit 2 Fingern)" aria-label="Rückgängig">

@@ -595,3 +595,48 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .day-filter .seg { display: inline-flex; flex: none; background: var(--bg-2); border-radius: 15px; padding: 2px; margin-right: 2px; }
 .day-filter .seg button { border: 0; background: transparent; color: var(--text-3); height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600; }
 .day-filter .seg button.active { background: var(--bg-3); color: var(--text); }
+
+/* Papier: leer, Punkte, Kästchen, Linien (scrollt mit der Seite, passt zur Schrift) */
+.paper-switch { display: inline-flex; gap: 2px; background: var(--bg-2); border-radius: 10px; padding: 3px; margin-left: 6px; }
+.paper-switch button {
+  width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--text-3);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.paper-switch button svg { width: 17px; height: 17px; }
+.paper-switch button:hover { color: var(--text); }
+.paper-switch button.active { background: var(--bg-3); color: var(--accent); }
+.note-page { --paper-line: rgba(255, 255, 255, .085); --paper-dot: rgba(255, 255, 255, .2); }
+.note-page[data-paper="dots"] {
+  background-image: radial-gradient(circle, var(--paper-dot) 1.1px, transparent 1.6px);
+  background-size: 24px 24px;
+  background-position: 0 0;
+}
+.note-page[data-paper="grid"] {
+  background-image:
+    linear-gradient(var(--paper-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--paper-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.note-page[data-paper="lines"] {
+  background-image: linear-gradient(transparent calc(100% - 1px), var(--paper-line) calc(100% - 1px));
+  background-size: 100% 34px;
+}
+@media (max-width: 760px) {
+  .paper-switch button { width: 26px; height: 28px; }
+}
+
+/* Schmale Notizseite (z. B. iPad hochkant im Split-Screen): Kopfzeile kompakter */
+.notes-pane { container-type: inline-size; container-name: notes; }
+@container notes (max-width: 560px) {
+  .notes-pane .head-row { gap: 2px; padding: 8px 6px; }
+  .notes-pane .mode-btn span { display: none; }
+  .notes-pane .mode-btn { padding: 6px 9px; }
+  .notes-pane .paper-switch { margin-left: 2px; }
+  .notes-pane .paper-switch button { width: 26px; }
+  .notes-pane .head-row .icon-btn { width: 34px; }
+  .notes-pane .save-state { display: none; }
+}
+@container notes (max-width: 380px) {
+  .notes-pane .paper-switch button { width: 23px; }
+  .notes-pane .head-row .icon-btn { width: 31px; }
+}

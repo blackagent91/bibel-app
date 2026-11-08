@@ -69,6 +69,29 @@ export class NotesEditor {
     this.bindBlocks();
     this.bindDrop();
     this.bindUndo();
+    this.bindPaper();
+  }
+
+  // ------------------------------------------------------------------ Papier (leer/Punkte/Kästchen/Linien)
+  bindPaper() {
+    const sw = $('#paper-switch');
+    sw.addEventListener('pointerdown', (e) => e.preventDefault()); // Fokus/Auswahl im Editor behalten
+    sw.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-paper]');
+      if (!b || !this.note) return;
+      const paper = b.dataset.paper;
+      this.applyPaper(paper);
+      try { localStorage.setItem('paper', paper); } catch {}
+      if (this.note.paper !== paper) {
+        this.note.paper = paper;
+        this.changed();
+      }
+    });
+  }
+
+  applyPaper(paper) {
+    this.el.page.dataset.paper = paper;
+    $$('#paper-switch [data-paper]').forEach((b) => b.classList.toggle('active', b.dataset.paper === paper));
   }
 
   // ------------------------------------------------------------------ Rückgängig: Knöpfe + Gesten
@@ -120,6 +143,7 @@ export class NotesEditor {
     this.dirtyInk = false;
     this.saveInk.cancel();
     this.el.title.value = note?.title || '';
+    this.applyPaper(note?.paper || readPaper());
     this.el.editor.innerHTML = note?.html || '';
     this.hist = [this.el.editor.innerHTML];
     this.hIdx = 0;
@@ -1270,6 +1294,15 @@ function bbox(p) {
     if (p[i + 1] > d) d = p[i + 1];
   }
   return [a, b, c, d];
+}
+
+/** Zuletzt gewähltes Papier (für neue Notizen) */
+function readPaper() {
+  try {
+    return localStorage.getItem('paper') || 'clean';
+  } catch {
+    return 'clean';
+  }
 }
 
 /** Striche als ein Datenblock: {meta: [[Werkzeug, Farbe, Breite, Länge] …], data: Float32Array} */

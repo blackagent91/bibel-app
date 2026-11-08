@@ -33,6 +33,8 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
   Textmarker, Schriftfarbe, Listen, Checklisten, Zitate, farbige **Blöcke**, Trennlinien
 - Blöcke (Bibelstellen, farbige Blöcke, Zitate) lassen sich verschieben (↑ ↓), umfärben,
   duplizieren und löschen
+- **Papier** wählbar über vier kleine Knöpfe oben: leer, Punkte, Kästchen oder Linien
+  (jede Notiz merkt sich ihr Papier, neue Notizen bekommen das zuletzt gewählte)
 - Modus **Stift**: frei schreiben und zeichnen mit dem Apple Pencil (druckempfindlich),
   Textmarker, Radierer, Farben, Strichstärken.
   „Nur Pencil“: Der Stift zeichnet, mit dem Finger scrollst du.
