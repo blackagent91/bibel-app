@@ -743,3 +743,10 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
   box-shadow: 0 14px 40px rgba(0,0,0,.6); border-color: var(--accent);
 }
 .scripture.dragging-block .scripture-grip { color: var(--accent); }
+
+/* ✕ in der Liste der Bibelstellen */
+.ref-item { align-items: center; }
+.ref-item-text { flex: 1; min-width: 0; }
+.ref-item .ref-del { flex: none; width: 32px; height: 32px; opacity: .55; }
+.ref-item:hover .ref-del { opacity: 1; }
+.ref-item .ref-del:hover { color: var(--danger); background: rgba(255,107,107,.12); }

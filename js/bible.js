@@ -452,7 +452,7 @@ export class BibleView {
       if (e.key === 'ArrowLeft') this.step(-1);
       if (e.key === 'ArrowRight') this.step(1);
       if (e.key === 'Escape') { this.clearSelection(); this.closeToc(); this.closeSearch(); }
-      if ((e.key === 'k' && (e.metaKey || e.ctrlKey)) || e.key === 'g') { e.preventDefault(); this.openToc(); }
+      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.openToc(); }
     });
 
     this.bindToc();

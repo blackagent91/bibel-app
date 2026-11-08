@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '41 · 08.11.2026';
+export const APP_VERSION = '42 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -160,6 +160,39 @@ async function deleteNote(id) {
   bible.applyMarks();
   renderDrawer();
   toast('Notiz gelöscht');
+}
+
+/** Einfache Markierung (ohne Notiz) löschen */
+async function deleteMark(id) {
+  state.marks = state.marks.filter((m) => m.id !== id);
+  await db.del('marks', id);
+  bible.applyMarks();
+  renderDrawer();
+  toast('Markierung gelöscht');
+}
+
+/** Bibelstelle aus einer Notiz entfernen (der übrige Inhalt der Notiz bleibt) */
+async function deleteNoteRef(noteId, idx) {
+  const n = state.notes.get(noteId);
+  const ref = n?.refs?.[idx];
+  if (!ref) return;
+  if (!confirm(`${formatRef(ref)} aus der Notiz „${n.title || 'Unbenannte Notiz'}“ entfernen?`)) return;
+  if (state.current?.id === noteId) {
+    // Notiz ist geöffnet: direkt im Editor entfernen (Rückgängig möglich)
+    const block = editor.el.editor.querySelectorAll('.scripture')[idx];
+    if (block) editor.removeScripture(block);
+  } else {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = n.html || '';
+    tpl.content.querySelectorAll('.scripture')[idx]?.remove();
+    n.html = tpl.innerHTML;
+    n.refs = n.refs.filter((_, i) => i !== idx);
+    n.updated = Date.now();
+    await persistNote(n);
+    toast('Bibelstelle aus der Notiz entfernt');
+  }
+  bible.applyMarks();
+  renderDrawer();
 }
 
 const sortedNotes = () => [...state.notes.values()].sort((a, b) => b.updated - a.updated);
@@ -354,8 +387,8 @@ function renderDrawer() {
   } else {
     // Alle markierten Stellen in Bibelreihenfolge
     const items = [];
-    for (const n of state.notes.values()) for (const r of n.refs || []) items.push({ ...r, day: refDay(r, n), noteId: n.id, label: n.title || 'Unbenannte Notiz' });
-    for (const m of state.marks) items.push({ ...m, day: refDay(m), label: 'Nur markiert' });
+    for (const n of state.notes.values()) (n.refs || []).forEach((r, idx) => items.push({ ...r, day: refDay(r, n), noteId: n.id, refIdx: idx, label: n.title || 'Unbenannte Notiz' }));
+    for (const m of state.marks) items.push({ ...m, day: refDay(m), markId: m.id, label: 'Nur markiert' });
     const filtered = items
       .filter((r) => !state.dayFilter || r.day === state.dayFilter)
       .filter((r) => !state.bookFilter || r.book === state.bookFilter)
@@ -373,9 +406,11 @@ function renderDrawer() {
         html += `<div class="ref-group"><h5>${esc(getBook(r.book).name)}</h5>`;
         lastBook = r.book;
       }
+      const delAttr = r.noteId ? `data-del-note="${r.noteId}" data-del-idx="${r.refIdx}"` : `data-del-mark="${r.markId}"`;
       html += `<div class="ref-item" data-goto="${r.book}:${r.chapter}:${r.vs}:${r.ve}" ${r.noteId ? `data-note="${r.noteId}"` : ''}>
         <i style="background:var(--c-${r.color || 'yellow'})"></i>
-        <div><b>${esc(formatRef(r))}</b><span>${esc(r.label)}</span></div></div>`;
+        <div class="ref-item-text"><b>${esc(formatRef(r))}</b><span>${esc(r.label)}</span></div>
+        <button class="icon-btn ref-del" ${delAttr} title="Löschen" aria-label="Bibelstelle löschen"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button></div>`;
     }
     list.innerHTML = html + '</div>';
   }
@@ -411,6 +446,12 @@ function bindDrawer() {
       })
   );
   $('#drawer-list').addEventListener('click', (e) => {
+    const refDel = e.target.closest('.ref-del');
+    if (refDel) {
+      e.stopPropagation();
+      if (refDel.dataset.delMark) return deleteMark(refDel.dataset.delMark);
+      return deleteNoteRef(refDel.dataset.delNote, +refDel.dataset.delIdx);
+    }
     const del = e.target.closest('[data-del]');
     if (del) {
       e.stopPropagation();
