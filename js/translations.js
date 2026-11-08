@@ -1,6 +1,6 @@
 // Übersetzungen: eingebaute (Dateien im Ordner data/) und importierte (IndexedDB)
 import { db, uid } from './db.js';
-import { BOOKS, findBook } from './books.js';
+import { BOOKS, findBook, parseRefList } from './books.js';
 
 export const BUILTIN = [
   {
@@ -96,12 +96,18 @@ export async function importBibleFile(file, { onProgress, signal, name: customNa
     note: `Importiert aus ${file.name}`,
     books: parsed.books,
     xrefs: parsed.xrefs || null,
+    headings: parsed.headings || null,
   };
   await db.put('bibles', entry);
   imported.push(entry);
   let verses = 0;
   for (const b of parsed.books) if (b) for (const c of b) if (c) verses += c.filter(Boolean).length;
-  return { id: entry.id, name, verses, report: parsed.report };
+  const report =
+    parsed.report ||
+    (parsed.headings
+      ? { headings: Object.keys(parsed.headings).length, xrefs: parsed.xrefCount || 0, structured: true }
+      : undefined);
+  return { id: entry.id, name, verses, report };
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +142,16 @@ export async function getXrefs(transId, bookId, chapter) {
   const prefix = `${chapter}:`;
   for (const [k, list] of Object.entries(ob)) if (k.startsWith(prefix)) add(+k.slice(prefix.length), 'ob', list);
   return res;
+}
+
+/** Zwischenüberschriften eines Kapitels: Vers -> Überschrift (nur bei Übersetzungen, die welche haben) */
+export function getHeadings(transId, bookId, chapter) {
+  const t = imported.find((x) => x.id === transId);
+  const out = new Map();
+  if (!t?.headings) return out;
+  const prefix = `${bookId}:${chapter}:`;
+  for (const [k, h] of Object.entries(t.headings)) if (k.startsWith(prefix)) out.set(+k.slice(prefix.length), h);
+  return out;
 }
 
 /** Kapitelanzahl eines Buches in einer Übersetzung (Traditionen unterscheiden sich, z. B. Joel 3/4) */
@@ -269,6 +285,34 @@ function cleanNode(el) {
 function parseJson(data) {
   const books = [];
   let name = '';
+
+  // Strukturiertes Format mit Überschriften und Querverweisen:
+  // { bibel, buecher: [{ name, abk, kapitel: [{ nr, verse: [{ nr, text, ueberschrift?, querverweise? }] }] }] }
+  if (data && Array.isArray(data.buecher)) {
+    name = data.bibel || data.name || '';
+    const headings = {};
+    const xrefs = {};
+    let xrefCount = 0;
+    data.buecher.forEach((b, i) => {
+      const id = (data.buecher.length === 66 ? i + 1 : 0) || findBook(b.abk || '')?.id || findBook(b.name || '')?.id;
+      if (!id) return;
+      for (const k of b.kapitel || []) {
+        for (const v of k.verse || []) {
+          put(books, id, Number(k.nr), Number(v.nr), v.text);
+          const key = `${id}:${k.nr}:${v.nr}`;
+          if (v.ueberschrift) headings[key] = String(v.ueberschrift).trim();
+          if (v.querverweise) {
+            const list = parseRefList(String(v.querverweise));
+            if (list.length) {
+              xrefs[key] = list;
+              xrefCount += list.length;
+            }
+          }
+        }
+      }
+    });
+    return { name, books: finalize(books), headings, xrefs, xrefCount };
+  }
 
   // Unser eigenes Format: { name, books: [ [ ["Vers1", ...], ... ], ... ] }
   if (data && Array.isArray(data.books) && Array.isArray(data.books[0]) ) {

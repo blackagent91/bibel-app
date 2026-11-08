@@ -75,6 +75,11 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 Eingebaut ist die **Elberfelder 1905** (gemeinfrei). Die Schlachter 2000 ist
 urheberrechtlich geschützt und deshalb nicht enthalten.
 
+Am besten eignet sich eine **strukturierte JSON-Datei** im Format
+`{ bibel, buecher: [{ name, abk, kapitel: [{ nr, verse: [{ nr, text, ueberschrift?, querverweise? }] }] }] }`:
+Sie wird in Sekunden übernommen, inklusive Zwischenüberschriften (erscheinen im Bibeltext)
+und Querverweisen (blaue Versnummern).
+
 Eigene Bibel importieren: **Einstellungen → Bibel-Datei importieren**. Das geht mit
 **PDF**, **Zefania-XML**, **OSIS-XML** und gängigen **JSON**-Formaten. Die importierte
 Bibel bleibt nur auf deinem Gerät und wird nirgends hochgeladen.

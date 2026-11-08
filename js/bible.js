@@ -1,6 +1,6 @@
 // Rechte Seite: Bibeltext, Inhaltsverzeichnis, Navigation, Auswahl, Suche
 import { BOOKS, getBook, parseRef, formatRef, parseCompact } from './books.js';
-import { getChapter, getBookData, getTranslation, chapterCount, getXrefs } from './translations.js';
+import { getChapter, getBookData, getTranslation, chapterCount, getXrefs, getHeadings } from './translations.js';
 import { $, $$, esc, COLORS } from './util.js';
 
 export class BibleView {
@@ -25,6 +25,7 @@ export class BibleView {
     this.searchScope = 'all';
     this.renderToken = 0;
     this.showXrefs = true;
+    this.showHeadings = true;
     this.xrefMode = 'on'; // 'on' = wichtige markieren, 'all' = alle markieren
     this.xrefs = new Map();
 
@@ -139,8 +140,13 @@ export class BibleView {
       this.el.text.innerHTML = `${head}<p class="missing">Dieses Kapitel ist in „${esc(t.name)}“ nicht enthalten.</p>`;
       return;
     }
+    const heads = this.showHeadings ? getHeadings(this.trans, book, chapter) : new Map();
     const html = verses
-      .map((txt, i) => (txt ? `<span class="v" data-v="${i + 1}"><sup class="vn">${i + 1}</sup>${esc(txt)}</span>` : ''))
+      .map((txt, i) => {
+        const h = heads.get(i + 1);
+        const head = h ? `<h3 class="sec-head">${esc(h)}</h3>` : '';
+        return txt ? `${head}<span class="v" data-v="${i + 1}"><sup class="vn">${i + 1}</sup>${esc(txt)}</span>` : head;
+      })
       .join('');
     this.el.text.innerHTML = head + `<div class="verses">${html}</div>`;
     this.applyMarks();
@@ -164,6 +170,12 @@ export class BibleView {
         vn.title = 'Parallelstellen anzeigen';
       }
     }
+  }
+
+  setShowHeadings(on) {
+    if (this.showHeadings === on) return;
+    this.showHeadings = on;
+    this.render();
   }
 
   setXrefMode(mode) {

@@ -704,3 +704,12 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 
 .dev-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--accent); padding: 3px 0; font-size: 13px; cursor: pointer; }
 .dev-item:hover { text-decoration: underline; }
+
+/* Zwischenüberschriften im Bibeltext (bei Übersetzungen, die welche mitbringen) */
+.bible-text .sec-head {
+  display: block; font-family: var(--bible-font); font-style: italic; font-weight: 600;
+  font-size: .92em; color: var(--text-2); margin: 1.1em 0 .35em; line-height: 1.35;
+  -webkit-user-select: none; user-select: none;
+}
+.bible-text .verses > .sec-head:first-child { margin-top: .2em; }
+.flow .sec-head { margin-top: .9em; }

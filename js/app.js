@@ -25,8 +25,8 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '31 · 08.11.2026';
-const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
+export const APP_VERSION = '32 · 08.11.2026';
+const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
 function readLS(key, fallback) {
@@ -571,6 +571,7 @@ function applySettings() {
   document.documentElement.style.setProperty('--note-size', `${settings.noteSize}px`);
   bible.setLayout(settings.layout, settings.font);
   if (bible.xrefMode !== settings.xrefs) bible.setXrefMode(settings.xrefs);
+  bible.setShowHeadings(settings.headings !== 'off');
   $('#out-bible-size').textContent = settings.bibleSize;
   $('#out-note-size').textContent = settings.noteSize;
 }
@@ -599,6 +600,7 @@ function bindSettings() {
     $('#set-font').value = settings.font;
     $('#set-xrefs').value = settings.xrefs;
     $('#set-swap').value = settings.swap;
+    $('#set-headings').value = settings.headings;
     renderTranslations();
     modal.classList.remove('hidden');
   };
@@ -617,6 +619,7 @@ function bindSettings() {
   bindInput('#set-font', 'font', false);
   bindInput('#set-xrefs', 'xrefs', false);
   bindInput('#set-swap', 'swap', false);
+  bindInput('#set-headings', 'headings', false);
 
   $('#translation').addEventListener('change', async (e) => {
     settings.trans = e.target.value;
@@ -671,7 +674,10 @@ function bindSettings() {
     const box = $('#import-result');
     box.classList.remove('hidden');
     let html = '';
-    if (r) {
+    if (r?.structured) {
+      html += `<p class="report-ok">✓ ${res.verses.toLocaleString('de-DE')} Verse in allen Büchern und Kapiteln übernommen – die Datei bringt die Einteilung schon mit.</p>
+        <p class="hint">Dazu ${r.headings.toLocaleString('de-DE')} Zwischenüberschriften und ${r.xrefs.toLocaleString('de-DE')} Querverweise.</p>`;
+    } else if (r) {
       html += `<div class="report-stats">
         <div><b>${r.books}/66</b><span>Bücher</span></div>
         <div><b>${r.chapters.toLocaleString('de-DE')}</b><span>Kapitel</span></div>
