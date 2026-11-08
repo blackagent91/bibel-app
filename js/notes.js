@@ -34,7 +34,7 @@ export function scriptureHTML(p, color = 'yellow') {
   return (
     `<div class="scripture" contenteditable="false" data-color="${color}" data-added="${Date.now()}" data-ref='${JSON.stringify(ref)}'>` +
     `<button class="scripture-ref" type="button">${esc(formatRef(ref))}<span class="scripture-trans">${esc(p.transShort || '')}</span></button>` +
-    `<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>` +
+    `<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><button class="scripture-remove" type="button" contenteditable="false" aria-label="Bibelstelle entfernen" title="Entfernen"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>` +
     `<div class="scripture-text">${verses}</div></div>`
   );
 }
@@ -331,6 +331,7 @@ export class NotesEditor {
       if (!this.el.editor.contains(el)) continue;
       const block = el.closest('.scripture');
       if (!block) continue;
+      if (el.closest('.scripture-remove')) return { kind: 'remove', block };
       if (el.closest('.scripture-toggle')) return { kind: 'toggle', block };
       if (el.closest('.scripture-ref')) return { kind: 'ref', block };
       if (!block.hasAttribute('data-open')) return { kind: 'collapsed', block };
@@ -345,6 +346,10 @@ export class NotesEditor {
     if (!hit) return false;
     if (hit.kind === 'ref') {
       this.onJump(JSON.parse(hit.block.dataset.ref));
+      return true;
+    }
+    if (hit.kind === 'remove') {
+      this.removeScripture(hit.block);
       return true;
     }
     if (hit.kind === 'toggle' || hit.kind === 'collapsed') {
@@ -421,6 +426,34 @@ export class NotesEditor {
       text.normalize();
     });
     this.changed();
+  }
+
+  /** Bibelstellen-Block entfernen (Rückgängig holt ihn zurück) */
+  removeScripture(block) {
+    if (!block) return;
+    this.structural(() => {
+      const next = block.nextElementSibling;
+      block.remove();
+      // leeren Absatz, der nur für den Block da war, mit entfernen
+      if (next && next.tagName === 'P' && !next.textContent.trim() && next.previousElementSibling?.tagName === 'P' && !next.previousElementSibling.textContent.trim()) next.remove();
+    });
+    if (this.handleBlock === block) this.hideHandle();
+    this.changed();
+    this.save.flush();
+    toast('Bibelstelle entfernt · Rückgängig mit ← oder 2-Finger-Tipp');
+  }
+
+  /** Weiteren Bibelstellen-Block direkt nach einem vorhandenen einfügen */
+  insertScriptureAfter(prev, payload, { color = 'yellow' } = {}) {
+    return this.structural(() => {
+      const tpl = document.createElement('template');
+      tpl.innerHTML = scriptureHTML(payload, color);
+      const block = tpl.content.firstChild;
+      prev.after(block);
+      this.changed();
+      this.save.flush();
+      return block;
+    });
   }
 
   toggleScripture(block) {
@@ -542,6 +575,11 @@ export class NotesEditor {
 
     ed.addEventListener('click', (e) => {
       const block = e.target.closest('.scripture');
+      if (e.target.closest('.scripture-remove')) {
+        e.preventDefault();
+        this.removeScripture(block);
+        return;
+      }
       const toggle = e.target.closest('.scripture-toggle');
       if (toggle || (block && !block.hasAttribute('data-open') && !e.target.closest('.scripture-ref'))) {
         e.preventDefault();
@@ -1521,8 +1559,11 @@ function bbox(p) {
 /** Ältere Bibelstellen-Blöcke um Aufklapp-Pfeil und Markierbarkeit ergänzen */
 function upgradeScriptureBlocks(root) {
   for (const b of root.querySelectorAll('.scripture')) {
+    if (b.querySelector('.scripture-toggle') && !b.querySelector('.scripture-remove')) {
+      b.querySelector('.scripture-toggle').insertAdjacentHTML('afterend', '<button class="scripture-remove" type="button" contenteditable="false" aria-label="Bibelstelle entfernen" title="Entfernen"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>');
+    }
     if (!b.querySelector('.scripture-toggle')) {
-      b.querySelector('.scripture-ref')?.insertAdjacentHTML('afterend', '<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>');
+      b.querySelector('.scripture-ref')?.insertAdjacentHTML('afterend', '<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><button class="scripture-remove" type="button" contenteditable="false" aria-label="Bibelstelle entfernen" title="Entfernen"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>');
     }
     const t = b.querySelector('.scripture-text');
     if (t) {

@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '33 · 08.11.2026';
+export const APP_VERSION = '34 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -168,14 +168,17 @@ const sortedNotes = () => [...state.notes.values()].sort((a, b) => b.updated - a
 // Aktionen aus der Bibel
 // ---------------------------------------------------------------------------
 function handleBibleAction(sel, act, extra) {
+  const parts = sel.parts || [sel];
   if (act === 'highlight') {
     bible.clearSelection();
-    return setHighlight(sel, extra);
+    return (async () => {
+      for (const p of parts) await setHighlight(p, extra);
+    })();
   }
   if (act === 'new') {
     if (state.focus === 'bible') setFocus(null);
-    const n = createNote(formatRef(sel));
-    editor.insertScripture(sel, { color: 'yellow' });
+    const n = createNote(sel.label || formatRef(sel));
+    for (const p of parts) editor.insertScripture(p, { color: 'yellow' });
     bible.clearSelection();
     showPane('notes');
     setTimeout(() => editor.el.editor.focus(), 50);
@@ -183,9 +186,9 @@ function handleBibleAction(sel, act, extra) {
     return;
   }
   if (act === 'add') {
-    editor.insertScripture(sel, { color: 'yellow' });
+    for (const p of parts) editor.insertScripture(p, { color: 'yellow' });
     bible.clearSelection();
-    toast(`${formatRef(sel)} → „${state.current.title || 'Notiz'}“`);
+    toast(`${sel.label || formatRef(sel)} → „${state.current.title || 'Notiz'}“`);
     return;
   }
   if (act === 'drag') startDrag(sel, extra);
@@ -194,7 +197,7 @@ function handleBibleAction(sel, act, extra) {
 /** Eigene Drag-&-Drop-Logik (funktioniert mit Maus, Finger und Apple Pencil) */
 function startDrag(sel, downEvent) {
   const ghost = $('#drag-ghost');
-  ghost.innerHTML = `<b>${esc(formatRef(sel))}</b><span>${esc(sel.verses.map((v) => v.t).join(' '))}</span>`;
+  ghost.innerHTML = `<b>${esc(sel.label || formatRef(sel))}</b><span>${esc(sel.verses.map((v) => v.t).join(' '))}</span>`;
   ghost.classList.remove('hidden');
   document.body.classList.add('dragging-ref');
   const move = (x, y) => {
@@ -224,9 +227,14 @@ function startDrag(sel, downEvent) {
 
 function dropScripture(sel, x, y) {
   if (editor.mode !== 'text') editor.setMode('text');
-  editor.insertScripture(sel, { x, y, color: 'yellow' });
+  // mehrere Abschnitte: in Bibelreihenfolge untereinander ablegen
+  const parts = sel.parts || [sel];
+  let block = null;
+  for (const p of parts) {
+    block = block ? editor.insertScriptureAfter(block, p, { color: 'yellow' }) : editor.insertScripture(p, { x, y, color: 'yellow' });
+  }
   bible.clearSelection();
-  toast(`${formatRef(sel)} in Notiz abgelegt`);
+  toast(`${sel.label || formatRef(sel)} in Notiz abgelegt`);
 }
 
 // ---------------------------------------------------------------------------

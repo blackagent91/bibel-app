@@ -713,3 +713,15 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 }
 .bible-text .verses > .sec-head:first-child { margin-top: .2em; }
 .flow .sec-head { margin-top: .9em; }
+
+/* ✕ zum Entfernen eines Bibelstellen-Blocks (neben dem Aufklapp-Pfeil) */
+.scripture { padding-right: 78px; }
+.scripture[data-open] { padding-right: 78px; }
+.scripture-toggle { right: 40px; }
+.scripture-remove {
+  position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; border-radius: 8px;
+  border: 0; background: transparent; color: var(--text-3);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.scripture-remove svg { width: 16px; height: 16px; }
+.scripture-remove:hover { background: rgba(255,107,107,.14); color: var(--danger); }

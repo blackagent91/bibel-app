@@ -330,17 +330,14 @@ export class BibleView {
       if (s && !s.isCollapsed && text.contains(s.anchorNode)) return; // echte Textauswahl
       const v = e.target.closest('.v');
       if (!v) return this.clearSelection();
+      // Jeder Tipp nimmt den Vers dazu; ein ausgewählter Vers wird beim erneuten Tipp wieder abgewählt
       const n = +v.dataset.v;
-      if (this.sel && this.tapAnchor != null) {
-        if (this.sel.vs === n && this.sel.ve === n) return this.clearSelection();
-        if (n >= this.sel.vs && n <= this.sel.ve && this.sel.vs !== this.sel.ve) {
-          this.tapAnchor = n;
-          return this.setSelection(n, n);
-        }
-        return this.setSelection(Math.min(this.tapAnchor, n), Math.max(this.tapAnchor, n));
-      }
+      if (this.tapAnchor == null) this.tapSet = new Set(); // vorher Textauswahl -> neu anfangen
       this.tapAnchor = n;
-      this.setSelection(n, n);
+      if (this.tapSet.has(n)) this.tapSet.delete(n);
+      else this.tapSet.add(n);
+      if (!this.tapSet.size) return this.clearSelection();
+      this.setSelectionSet(this.tapSet);
     });
 
     // Echte Textauswahl (Maus oder Finger-Markierung)
@@ -383,7 +380,7 @@ export class BibleView {
       if (!this.sel) return;
       const payload = this.selectionPayload();
       e.dataTransfer.setData('application/x-bibelstelle', JSON.stringify(payload));
-      e.dataTransfer.setData('text/plain', `${formatRef(payload)}: ${payload.verses.map((v) => v.t).join(' ')}`);
+      e.dataTransfer.setData('text/plain', `${payload.label}: ${payload.verses.map((v) => v.t).join(' ')}`);
       e.dataTransfer.effectAllowed = 'copy';
     });
 
@@ -487,20 +484,38 @@ export class BibleView {
     }
   }
 
-  setSelection(vs, ve, native = false) {
-    this.sel = { book: this.pos.book, chapter: this.pos.chapter, vs, ve };
+  /** Auswahl aus einzelnen Versen (dürfen Lücken haben) */
+  setSelectionSet(set) {
+    const nums = [...set].sort((a, b) => a - b);
+    const groups = [];
+    for (const n of nums) {
+      const g = groups[groups.length - 1];
+      if (g && n === g[1] + 1) g[1] = n;
+      else groups.push([n, n]);
+    }
+    this.setSelection(nums[0], nums[nums.length - 1], false, groups);
+  }
+
+  setSelection(vs, ve, native = false, groups = [[vs, ve]]) {
+    if (native) this.tapSet = new Set();
+    this.sel = { book: this.pos.book, chapter: this.pos.chapter, vs, ve, groups };
     $$('.v.sel', this.el.text).forEach((el) => el.classList.remove('sel'));
     if (!native) {
-      for (let n = vs; n <= ve; n++) this.el.text.querySelector(`.v[data-v="${n}"]`)?.classList.add('sel');
+      for (const [a, b] of groups) for (let n = a; n <= b; n++) this.el.text.querySelector(`.v[data-v="${n}"]`)?.classList.add('sel');
     }
-    this.el.menuRef.textContent = formatRef(this.sel);
+    this.el.menuRef.textContent = formatGroups(this.sel);
     this.el.menu.classList.remove('hidden');
     this.positionMenu();
   }
 
+  /** Auswahl für Notizen/Markierungen: je zusammenhängender Abschnitt eine eigene Stelle */
   selectionPayload() {
     const s = this.sel;
-    return { ...s, trans: this.trans, transShort: getTranslation(this.trans).short, verses: this.verseText(s.vs, s.ve) };
+    const transShort = getTranslation(this.trans).short;
+    const parts = (s.groups || [[s.vs, s.ve]]).map(([vs, ve]) => ({
+      book: s.book, chapter: s.chapter, vs, ve, trans: this.trans, transShort, verses: this.verseText(vs, ve),
+    }));
+    return { ...parts[0], vs: s.vs, ve: s.ve, parts, label: formatGroups(s), verses: parts.flatMap((p) => p.verses) };
   }
 
   positionMenu() {
@@ -529,6 +544,7 @@ export class BibleView {
   clearSelection() {
     this.sel = null;
     this.tapAnchor = null;
+    this.tapSet = new Set();
     this.hideMenu();
     $$('.v.sel', this.el.text).forEach((el) => el.classList.remove('sel'));
     const s = window.getSelection();
@@ -709,4 +725,11 @@ export class BibleView {
         )
         .join('');
   }
+}
+
+/** „Johannes 3,16.18-19“ – Stelle mit mehreren Abschnitten */
+export function formatGroups(sel) {
+  const groups = sel.groups || [[sel.vs, sel.ve]];
+  const first = formatRef({ book: sel.book, chapter: sel.chapter, vs: groups[0][0], ve: groups[0][1] });
+  return [first, ...groups.slice(1).map(([a, z]) => (a === z ? `${a}` : `${a}-${z}`))].join('.');
 }
