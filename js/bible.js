@@ -313,6 +313,12 @@ export class BibleView {
 
     // Tippen auf einen Vers -> Vers auswählen (iPad-freundlich)
     text.addEventListener('click', (e) => {
+      if (this.swallowClick && Date.now() - this.swallowClick < 800) {
+        this.swallowClick = 0; // Tipp hat nur das Fenster geschlossen
+        e.stopPropagation();
+        return;
+      }
+      this.swallowClick = 0;
       const vnx = e.target.closest('.vn-x');
       if (vnx) {
         e.stopPropagation();
@@ -408,7 +414,13 @@ export class BibleView {
       '<button class="swatch none" data-act="color" data-color="none" title="Markierung entfernen"></button>';
 
     document.addEventListener('pointerdown', (e) => {
-      if (!this.el.versePop.contains(e.target)) this.el.versePop.classList.add('hidden');
+      const pop = this.el.versePop;
+      if (!pop.contains(e.target) && !pop.classList.contains('hidden')) {
+        // offenes Fenster (Parallelstellen/Notizen): dieser Tipp schließt nur das Fenster
+        pop.classList.add('hidden');
+        if (text.contains(e.target)) this.swallowClick = Date.now();
+        return;
+      }
       if (this.el.menu.contains(e.target) || text.contains(e.target)) return;
       if (e.target.closest('.drag-ghost')) return;
       this.hideMenu();

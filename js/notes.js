@@ -29,6 +29,7 @@ const PALM_SIZE = 40;
 const PAGE_W = 640; // feste Seitenbreite der Notiz (logische Pixel), wird auf die Spaltenbreite skaliert
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 1.35;
+const MOVE_HOLD_MS = 500; // so lange auf einer Form halten, um sie zu verschieben
 const HOLD_MS = 550; // so lange den Stift ruhig halten, damit eine Form einrastet
 const AUTO_SHAPE_SIZE = 75; // ab dieser Größe (px Diagonale) werden Formen automatisch erkannt // Kontaktfläche (px), ab der eine Berührung als Handballen gilt
 
@@ -1307,6 +1308,12 @@ class Ink {
         s: { t: this.tool, c: this.color, w: this.width, p: [r1(x), r1(y), r2(pr)] },
       };
       this.scheduleLive();
+      // Stift auf einer Form/einem Strich ruhig halten -> verschieben (samt umrahmtem Inhalt)
+      const started = this.current;
+      clearTimeout(this.moveTimer);
+      this.moveTimer = setTimeout(() => {
+        if (this.current === started && started.s.p.length <= 6) this.startMove(started, x, y);
+      }, MOVE_HOLD_MS);
     });
 
     c.addEventListener('pointermove', (e) => {
@@ -1336,6 +1343,15 @@ class Ink {
         if (Math.abs(e.clientX - cur.x0) + Math.abs(e.clientY - cur.y0) > 6) cur.moved = true;
         this.previewMark(e.clientX, e.clientY);
         return;
+      }
+      if (cur.move) {
+        this.moveTo(cur, e);
+        return;
+      }
+      if (cur.s && cur.s.p.length <= 6) {
+        // erste Bewegung: wer zeichnet, will nicht verschieben
+        const [mx, my] = this.toPage(e);
+        if (Math.hypot(mx - cur.s.p[0], my - cur.s.p[1]) > 6) clearTimeout(this.moveTimer);
       }
       if (cur.snapped) return; // Form ist schon eingerastet
       const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
@@ -1378,6 +1394,11 @@ class Ink {
       if (cur.pen) {
         this.lastPen = Date.now();
         this.stopInkingSoon();
+      }
+      clearTimeout(this.moveTimer);
+      if (cur.move) {
+        this.endMove(cur);
+        return;
       }
       if (cur.tap) {
         if (e.type === 'pointerup' && Math.abs(e.clientX - cur.x0) < 12 && Math.abs(e.clientY - cur.y0) < 12) this.ed.tapScripture(cur.hit);
@@ -1539,9 +1560,94 @@ class Ink {
     if (!shape) return false;
     cur.s.p = shape.points;
     cur.snapped = shape.kind;
+    cur.s.k = shape.kind;
     if (cur.s.t === 'marker') this.schedule(); // Marker-Ebene komplett neu
     else this.scheduleLive(true);
     return true;
+  }
+
+  /**
+   * Verschieben starten: Strich unter dem Stift (bzw. Form, in deren Innerem der Stift steht)
+   * und – bei geschlossenen Formen – alles, was darin liegt.
+   */
+  startMove(cur, x, y) {
+    const pick = findMoveTarget(this.strokes, x, y);
+    if (!pick) return false;
+    // Ausgewählte Striche durch Kopien ersetzen, damit Rückgängig die alte Lage wiederherstellt
+    const sel = new Set(pick);
+    const copies = new Map();
+    this.strokes = this.strokes.map((s) => {
+      if (!sel.has(s)) return s;
+      const c = { ...s, p: s.p.slice() };
+      copies.set(c, s.p.slice());
+      return c;
+    });
+    cur.move = { items: [...copies.keys()], orig: copies, x0: x, y0: y, dx: 0, dy: 0 };
+    cur.s = null;
+    // ausgewählte Striche ausblenden und auf der Live-Ebene zeichnen
+    this.moving = new Set(cur.move.items);
+    this.clearLive();
+    this.schedule();
+    this.drawMoving(cur);
+    toast(pick.length > 1 ? `${pick.length} Elemente verschieben` : 'Verschieben', 1200);
+    return true;
+  }
+
+  moveTo(cur, e) {
+    const [x, y] = this.toPage(e);
+    cur.move.dx = x - cur.move.x0;
+    cur.move.dy = y - cur.move.y0;
+    if (this.liveRaf) return;
+    this.liveRaf = requestAnimationFrame(() => {
+      this.liveRaf = 0;
+      this.drawMoving(cur);
+    });
+  }
+
+  drawMoving(cur) {
+    const { items, orig, dx, dy } = cur.move;
+    for (const s of items) {
+      const o = orig.get(s);
+      for (let i = 0; i < o.length; i += 3) {
+        s.p[i] = r1(o[i] + dx);
+        s.p[i + 1] = r1(o[i + 1] + dy);
+      }
+      BOXES.delete(s);
+    }
+    this.clearLive();
+    const ctx = this.lctx;
+    this.prepare(ctx);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of items) {
+      if (s.t === 'marker') ctx.globalAlpha = 0.38;
+      this.drawStroke(ctx, s);
+      ctx.globalAlpha = 1;
+      for (let i = 0; i < s.p.length; i += 3) {
+        minX = Math.min(minX, s.p[i]); maxX = Math.max(maxX, s.p[i]);
+        minY = Math.min(minY, s.p[i + 1]); maxY = Math.max(maxY, s.p[i + 1]);
+      }
+    }
+    // gestrichelter Rahmen um die Auswahl
+    ctx.save();
+    ctx.setLineDash([6, 5]);
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = '#e8c26e';
+    ctx.strokeRect(minX - 8, minY - 8, maxX - minX + 16, maxY - minY + 16);
+    ctx.restore();
+  }
+
+  endMove(cur) {
+    cancelAnimationFrame(this.liveRaf);
+    this.liveRaf = 0;
+    this.drawMoving(cur);
+    this.moving = null;
+    this.clearLive();
+    if (Math.abs(cur.move.dx) < 1 && Math.abs(cur.move.dy) < 1) {
+      this.undoStack.pop(); // nichts bewegt
+      this.schedule();
+      return;
+    }
+    this.changed();
   }
 
   /** Tipp auf ein Wort im Bibeltext: Markierung entfernen bzw. Wort markieren */
@@ -1625,6 +1731,7 @@ class Ink {
       let box = BOXES.get(s);
       if (!box) BOXES.set(s, (box = bbox(s.p)));
       if (box[3] < minY || box[1] > maxY) continue; // nur sichtbare Striche zeichnen
+      if (this.moving?.has(s)) continue; // wird gerade verschoben (Live-Ebene)
       this.drawStroke(s.t === 'marker' ? mctx : ctx, s);
     }
     // Marker, der gerade gemalt wird, gehört mit auf die Marker-Ebene
@@ -1793,7 +1900,8 @@ export function recognizeShape(p, minSize = 0) {
     if (i) len += Math.hypot(x - pts[i - 1][0], y - pts[i - 1][1]);
   });
   const w = maxX - minX, h = maxY - minY, diag = Math.hypot(w, h);
-  if (diag < Math.max(minSize, 18)) return null;
+  if (diag < 18) return null;
+  const big = diag >= minSize; // Linien und Kreise nur groß automatisch (Handschrift: „l“, „o“ …)
   const A = pts[0], Z = pts[n - 1];
   const chord = Math.hypot(Z[0] - A[0], Z[1] - A[1]);
   const out = (kind, poly, closed) => ({ kind, points: densify(poly, closed, pr) });
@@ -1807,6 +1915,7 @@ export function recognizeShape(p, minSize = 0) {
       const near = (t) => Math.abs(((ang - t + 540) % 360) - 180) < 8;
       if (near(0) || near(180)) z = [z[0], a[1]]; // waagerecht
       else if (near(90) || near(-90)) z = [a[0], z[1]]; // senkrecht
+      if (!big) return null;
       return out('line', [a, z], false);
     }
     return null;
@@ -1815,8 +1924,19 @@ export function recognizeShape(p, minSize = 0) {
   // --- geschlossene Formen
   if (chord > Math.max(24, 0.3 * diag) || len < 2.2 * diag * 0.9) return null;
   const poly = cornersOf(pts, diag);
-  if (poly.length === 3) return out('triangle', poly, true);
-  if (poly.length === 4) {
+  // Vierecke/Dreiecke auch klein – aber nur, wenn die Seiten wirklich gerade sind (sonst z. B. „D“, „A“)
+  const straight = (pg) => {
+    let maxD = 0, sum = 0;
+    for (const [x, y] of pts) {
+      let d = Infinity;
+      for (let i = 0; i < pg.length; i++) d = Math.min(d, distToSeg(x, y, pg[i], pg[(i + 1) % pg.length]));
+      maxD = Math.max(maxD, d);
+      sum += d;
+    }
+    return maxD <= Math.max(3, diag * 0.1) && sum / pts.length <= Math.max(1.6, diag * 0.04);
+  };
+  if (poly.length === 3 && straight(poly)) return out('triangle', poly, true);
+  if (poly.length === 4 && straight(poly)) {
     const angles = poly.map((q, i) => angleAt(poly[(i + 3) % 4], q, poly[(i + 1) % 4]));
     if (angles.every((g) => Math.abs(g - 90) < 25)) {
       // fast achsenparallel -> sauberes Rechteck
@@ -1830,7 +1950,7 @@ export function recognizeShape(p, minSize = 0) {
   const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, rx = w / 2, ry = h / 2;
   if (rx < 6 || ry < 6) return null;
   const err = pts.reduce((s, [x, y]) => s + Math.abs(Math.hypot((x - cx) / rx, (y - cy) / ry) - 1), 0) / n;
-  if (err < 0.13) {
+  if (err < 0.13 && big) {
     const round = Math.abs(rx - ry) / Math.max(rx, ry) < 0.18;
     const r = (rx + ry) / 2;
     const RX = round ? r : rx, RY = round ? r : ry;
@@ -1843,6 +1963,62 @@ export function recognizeShape(p, minSize = 0) {
     return { kind: round ? 'circle' : 'ellipse', points: ring.flatMap(([x, y]) => [r1(x), r1(y), pr]) };
   }
   return null;
+}
+
+/** Ist ein Strich geschlossen (Kreis, Viereck, Schleife um etwas herum)? */
+function isClosedStroke(s) {
+  const p = s.p;
+  if (p.length < 24) return false;
+  const box = BOXES.get(s) || bbox(p);
+  const diag = Math.hypot(box[2] - box[0], box[3] - box[1]);
+  if (diag < 30) return false;
+  return Math.hypot(p[0] - p[p.length - 3], p[1] - p[p.length - 2]) <= Math.max(18, diag * 0.25);
+}
+
+function insidePolygon(x, y, p) {
+  let inside = false;
+  for (let i = 0, j = p.length - 3; i < p.length; j = i, i += 3) {
+    const xi = p[i], yi = p[i + 1], xj = p[j], yj = p[j + 1];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi || 1e-9) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Was soll verschoben werden? Ein Strich direkt unter dem Stift, sonst die kleinste geschlossene Form,
+ * in der der Stift steht. Bei geschlossenen Formen kommt alles mit, was darin liegt.
+ */
+function findMoveTarget(strokes, x, y) {
+  let hit = null;
+  let best = Infinity;
+  for (const s of strokes) {
+    const p = s.p;
+    const tol = Math.max(8, s.w * (s.t === 'marker' ? 3 : 1.5));
+    for (let i = 0; i < p.length; i += 3) {
+      const d = Math.hypot(p[i] - x, p[i + 1] - y);
+      if (d < tol && d < best) { best = d; hit = s; }
+    }
+  }
+  if (!hit) {
+    let area = Infinity;
+    for (const s of strokes) {
+      if (!isClosedStroke(s) || !insidePolygon(x, y, s.p)) continue;
+      const b = bbox(s.p);
+      const a = (b[2] - b[0]) * (b[3] - b[1]);
+      if (a < area) { area = a; hit = s; }
+    }
+  }
+  if (!hit) return null;
+  const items = [hit];
+  if (isClosedStroke(hit)) {
+    for (const s of strokes) {
+      if (s === hit) continue;
+      let inside = 0;
+      for (let i = 0; i < s.p.length; i += 3) if (insidePolygon(s.p[i], s.p[i + 1], hit.p)) inside++;
+      if (inside / (s.p.length / 3) >= 0.7) items.push(s);
+    }
+  }
+  return items;
 }
 
 function distToSeg(x, y, a, b) {
@@ -1937,7 +2113,7 @@ export function packStrokes(strokes) {
   let o = 0;
   for (const s of strokes) {
     data.set(s.p, o);
-    meta.push([s.t, s.c, s.w, s.p.length]);
+    meta.push(s.k ? [s.t, s.c, s.w, s.p.length, s.k] : [s.t, s.c, s.w, s.p.length]);
     o += s.p.length;
   }
   return { meta, data };
@@ -1949,10 +2125,10 @@ export function unpackStrokes(note) {
     const { meta, data } = note.ink;
     const arr = data instanceof Float32Array ? data : Float32Array.from(data || []);
     let o = 0;
-    return meta.map(([t, c, w, len]) => {
+    return meta.map(([t, c, w, len, k]) => {
       const p = Array.from(arr.subarray(o, o + len), (v) => Math.round(v * 100) / 100);
       o += len;
-      return { t, c, w, p };
+      return k ? { t, c, w, p, k } : { t, c, w, p };
     });
   }
   return note.strokes || [];
