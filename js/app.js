@@ -4,7 +4,7 @@ import { BOOKS, getBook, formatRef, compareRefs } from './books.js';
 import { loadImported, listTranslations, getTranslation, importBibleFile, deleteImported } from './translations.js';
 import { BibleView } from './bible.js';
 import { NotesEditor } from './notes.js';
-import { $, $$, esc, toast, formatDate } from './util.js';
+import { $, $$, esc, toast, formatDate, dayKey, dayLabel } from './util.js';
 
 // ---------------------------------------------------------------------------
 // Zustand
@@ -14,9 +14,15 @@ const state = {
   marks: [], // einfache Markierungen ohne Notiz: {id, book, chapter, vs, ve, color}
   current: null, // aktuell geöffnete Notiz
   drawerTab: 'notes',
+  dayFilter: null, // "2026-11-08" oder null = alle Tage
 };
 
-export const APP_VERSION = '9 · 08.11.2026';
+/** Tage, an denen an einer Notiz gearbeitet wurde */
+const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updated)])];
+/** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
+const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
+
+export const APP_VERSION = '10 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -78,7 +84,7 @@ async function setHighlight(sel, color) {
     if (m.vs < sel.vs) next.push({ ...m, id: uid('m_'), ve: sel.vs - 1 });
     if (m.ve > sel.ve) next.push({ ...m, id: uid('m_'), vs: sel.ve + 1 });
   }
-  if (color !== 'none') next.push({ id: uid('m_'), book: sel.book, chapter: sel.chapter, vs: sel.vs, ve: sel.ve, color });
+  if (color !== 'none') next.push({ id: uid('m_'), book: sel.book, chapter: sel.chapter, vs: sel.vs, ve: sel.ve, color, created: Date.now() });
   const keep = new Set(next.map((m) => m.id));
   for (const m of removed) if (!keep.has(m.id)) await db.del('marks', m.id);
   for (const m of next) if (!state.marks.includes(m)) await db.put('marks', m);
@@ -229,26 +235,57 @@ function closeDrawer() {
   drawer.setAttribute('aria-hidden', 'true');
 }
 
+function renderDayFilter() {
+  const counts = new Map();
+  if (state.drawerTab === 'notes') {
+    for (const n of state.notes.values()) for (const d of noteDays(n)) counts.set(d, (counts.get(d) || 0) + 1);
+  } else {
+    for (const n of state.notes.values()) for (const r of n.refs || []) { const d = refDay(r, n); counts.set(d, (counts.get(d) || 0) + 1); }
+    for (const m of state.marks) { const d = refDay(m); counts.set(d, (counts.get(d) || 0) + 1); }
+  }
+  const days = [...counts.keys()].sort().reverse();
+  const bar = $('#day-filter');
+  if (days.length < 2 && !state.dayFilter) {
+    bar.innerHTML = '';
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  const chip = (key, label, n) =>
+    `<button class="chip${state.dayFilter === key ? ' active' : ''}" data-day="${key || ''}">${esc(label)}${n != null ? ` <em>${n}</em>` : ''}</button>`;
+  bar.innerHTML = chip(null, 'Alle Tage') + days.map((d) => chip(d, dayLabel(d), counts.get(d))).join('');
+}
+
 function renderDrawer() {
   if (!drawer.classList.contains('open')) return;
+  renderDayFilter();
   const q = $('#drawer-search').value.trim().toLowerCase();
   const list = $('#drawer-list');
   if (state.drawerTab === 'notes') {
     const notes = sortedNotes().filter((n) => {
+      if (state.dayFilter && !noteDays(n).includes(state.dayFilter)) return false;
       if (!q) return true;
       const hay = `${n.title} ${n.text} ${(n.refs || []).map((r) => formatRef(r) + ' ' + formatRef(r, true)).join(' ')}`.toLowerCase();
       return hay.includes(q);
     });
     if (!notes.length) {
-      list.innerHTML = `<div class="empty">${q ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere rechts eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
+      list.innerHTML = `<div class="empty">${q || state.dayFilter ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere rechts eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
       return;
     }
+    let lastDay = null;
     list.innerHTML = notes
       .map((n) => {
+        // ohne Tagesfilter: Überschrift je Tag der letzten Bearbeitung
+        let head = '';
+        const d = dayKey(n.updated);
+        if (!state.dayFilter && d !== lastDay) {
+          head = `<h5 class="day-head">${esc(dayLabel(d, true))}</h5>`;
+          lastDay = d;
+        }
         const refs = (n.refs || [])
           .map((r, i) => `<button class="chip" data-note="${n.id}" data-ref-idx="${i}"><i style="background:var(--c-${r.color || 'yellow'})"></i>${esc(formatRef(r, true))}</button>`)
           .join('');
-        return `<div class="note-item${state.current?.id === n.id ? ' active' : ''}" data-open="${n.id}">
+        return `${head}<div class="note-item${state.current?.id === n.id ? ' active' : ''}" data-open="${n.id}">
           <h4>${esc(n.title || 'Unbenannte Notiz')}</h4>
           ${refs ? `<div class="chips">${refs}</div>` : ''}
           ${n.text ? `<p>${esc(n.text.slice(0, 160))}</p>` : ''}
@@ -260,13 +297,14 @@ function renderDrawer() {
   } else {
     // Alle markierten Stellen in Bibelreihenfolge
     const items = [];
-    for (const n of state.notes.values()) for (const r of n.refs || []) items.push({ ...r, noteId: n.id, label: n.title || 'Unbenannte Notiz' });
-    for (const m of state.marks) items.push({ ...m, label: 'Nur markiert' });
+    for (const n of state.notes.values()) for (const r of n.refs || []) items.push({ ...r, day: refDay(r, n), noteId: n.id, label: n.title || 'Unbenannte Notiz' });
+    for (const m of state.marks) items.push({ ...m, day: refDay(m), label: 'Nur markiert' });
     const filtered = items
+      .filter((r) => !state.dayFilter || r.day === state.dayFilter)
       .filter((r) => !q || `${formatRef(r)} ${formatRef(r, true)} ${r.label}`.toLowerCase().includes(q))
       .sort(compareRefs);
     if (!filtered.length) {
-      list.innerHTML = `<div class="empty">${q ? 'Nichts gefunden.' : 'Noch keine markierten Bibelstellen.'}</div>`;
+      list.innerHTML = `<div class="empty">${q || state.dayFilter ? 'Nichts gefunden.' : 'Noch keine markierten Bibelstellen.'}</div>`;
       return;
     }
     let html = '';
@@ -295,6 +333,13 @@ function bindDrawer() {
     setTimeout(() => editor.el.title.focus(), 50);
   };
   $('#drawer-search').addEventListener('input', renderDrawer);
+  $('#day-filter').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-day]');
+    if (!c) return;
+    state.dayFilter = c.dataset.day || null;
+    renderDrawer();
+    $('#drawer-list').scrollTop = 0;
+  });
   $$('#drawer .tab').forEach(
     (t) =>
       (t.onclick = () => {

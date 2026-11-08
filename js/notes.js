@@ -1,6 +1,6 @@
 // Linke Seite: Notiz-Editor (Text + Blöcke) und Zeichenebene für Apple Pencil
 import { formatRef } from './books.js';
-import { $, $$, esc, COLORS, debounce, toast } from './util.js';
+import { $, $$, esc, COLORS, debounce, toast, dayKey } from './util.js';
 
 const TEXT_COLORS = ['#f2f2f2', '#b4b4ba', '#e8c26e', '#6cd28c', '#6eaaff', '#ff78b4', '#aa82ff', '#ff9650', '#ff6b6b'];
 const HILITE = {
@@ -32,7 +32,7 @@ export function scriptureHTML(p, color = 'yellow') {
   const ref = { book: p.book, chapter: p.chapter, vs: p.vs, ve: p.ve };
   const verses = (p.verses || []).map((v) => `<sup>${v.n}</sup>${esc(v.t)}`).join(' ');
   return (
-    `<div class="scripture" contenteditable="false" data-color="${color}" data-ref='${JSON.stringify(ref)}'>` +
+    `<div class="scripture" contenteditable="false" data-color="${color}" data-added="${Date.now()}" data-ref='${JSON.stringify(ref)}'>` +
     `<button class="scripture-ref" type="button">${esc(formatRef(ref))}<span class="scripture-trans">${esc(p.transShort || '')}</span></button>` +
     `<div class="scripture-text">${verses}</div></div>`
   );
@@ -114,6 +114,7 @@ export class NotesEditor {
   load(note) {
     if (this.note && this.note.id !== note?.id) this.save.flush();
     this.note = note;
+    this.dirty = false;
     this.el.title.value = note?.title || '';
     this.el.editor.innerHTML = note?.html || '';
     this.hist = [this.el.editor.innerHTML];
@@ -130,7 +131,8 @@ export class NotesEditor {
     return $$('.scripture', this.el.editor)
       .map((b) => {
         try {
-          return { ...JSON.parse(b.dataset.ref), color: b.dataset.color || 'yellow' };
+          const added = +b.dataset.added || this.note?.created || Date.now();
+          return { ...JSON.parse(b.dataset.ref), color: b.dataset.color || 'yellow', added };
         } catch {
           return null;
         }
@@ -139,7 +141,8 @@ export class NotesEditor {
   }
 
   commit() {
-    if (!this.note) return;
+    if (!this.note || !this.dirty) return; // nur speichern, wenn sich wirklich etwas geändert hat
+    this.dirty = false;
     const n = this.note;
     n.title = this.el.title.value.trim();
     n.html = this.el.editor.innerHTML;
@@ -150,6 +153,8 @@ export class NotesEditor {
     n.refs = this.extractRefs();
     n.strokes = this.ink.strokes;
     n.updated = Date.now();
+    // Tage, an denen an dieser Notiz gearbeitet wurde (für „Nach Tag filtern“)
+    n.days = [...new Set([...(n.days || [dayKey(n.created)]), dayKey(n.updated)])];
     this.onSave(n);
     this.renderMeta();
     this.el.saveState.textContent = 'Gespeichert';
@@ -158,6 +163,7 @@ export class NotesEditor {
   }
 
   changed() {
+    this.dirty = true;
     this.el.saveState.textContent = '…';
     this.save();
   }

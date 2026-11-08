@@ -37,6 +37,9 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 **Notizverzeichnis (☰ oben links)**
 - Alle Notizen mit ihren Bibelstellen; ein Tipp öffnet die Notiz **und springt rechts zur Stelle**
 - Reiter „Bibelstellen“: alle markierten Stellen in biblischer Reihenfolge
+- **Nach Tag filtern:** Leiste mit allen Tagen, an denen du gearbeitet hast („Heute“, „Gestern“,
+  „Do., 5. Nov.“ …). Ein Tipp zeigt nur die Notizen, die an diesem Tag erstellt oder bearbeitet
+  wurden, bzw. die Stellen, die an dem Tag markiert wurden. Ohne Filter ist die Liste nach Tagen gegliedert.
 - Stellen mit Notiz sind in der Bibel farbig hinterlegt und tragen ein kleines Notiz-Symbol.
   Tippst du darauf, öffnet sich die Notiz.
 

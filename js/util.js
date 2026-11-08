@@ -36,6 +36,27 @@ export function toast(msg, ms = 2600) {
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
+/** Lokales Datum als Schlüssel "2026-11-08" */
+export function dayKey(ts = Date.now()) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** "Heute", "Gestern" oder z. B. "Fr., 6. Nov." (lang: "Freitag, 6. November") */
+export function dayLabel(key, long = false) {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  if (key === dayKey()) return 'Heute';
+  const yest = new Date();
+  yest.setDate(yest.getDate() - 1);
+  if (key === dayKey(yest)) return 'Gestern';
+  const opts = long
+    ? { weekday: 'long', day: 'numeric', month: 'long' }
+    : { weekday: 'short', day: 'numeric', month: 'short' };
+  if (y !== new Date().getFullYear()) opts.year = 'numeric';
+  return date.toLocaleDateString('de-DE', opts);
+}
+
 export function formatDate(ts) {
   const d = new Date(ts);
   const now = new Date();
