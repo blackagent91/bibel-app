@@ -113,6 +113,17 @@ const HYPHEN_END = /[-\u00AD\u2010\u2011]\s*$/;
 
 const REF_LIST = /^(\s*(\d\s?)?[A-ZÄÖÜ][a-zäöü]{0,6}\.?\s?\d+(,\s?\d+[a-z]?)?([-–.]\s?\d+[a-z]?)*(\s?(u\.|f+\.?)\s?\d*)?\s*[;,.]?)+\s*$/;
 
+/**
+ * Zeile mit Parallelstellen? Neben dem strengen Muster auch freiere Formen wie
+ * „1Kor 1,10–4,21; 2Kor 3,1 u. 5“ oder „vgl. Ri 6,11–8,35“: nur kurze Wörter (Abkürzungen) und Stellenangaben.
+ */
+function isRefLine(t) {
+  if (REF_LIST.test(t)) return true;
+  if (!/\d+\s?,\s?\d+/.test(t)) return false;
+  const words = t.match(/[A-Za-zÄÖÜäöüß]+/g) || [];
+  return words.length > 0 && words.every((w) => w.length <= 5 || /^(vgl|siehe|Kapitel)$/i.test(w));
+}
+
 /** Weighted mode (häufigster Wert, gewichtet nach Zeichenanzahl) */
 function weightedMode(entries) {
   const m = new Map();
@@ -451,15 +462,20 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     if (st.provisional && st.book !== 19 && n <= 3) return startChapter(n, 1);
     // Absicherung: neues „Kapitel 1“ ohne erkannten Buchtitel -> nächstes Buch der Bibel
     if (st.suspended && st.book === 66) return; // Anhang nach der Offenbarung
-    const wellUnderway = st.chapter > 1 || st.verse >= 6;
-    if (n === 1 && st.chapter === 1 && !wellUnderway) return startChapter(1, 1); // Kapitel 1 erst jetzt richtig begonnen
-    if (n === 1 && st.book < 66 && wellUnderway) {
+    if (n === 1 && st.chapter === 1) {
+      // Kapitelzahl 1 des laufenden Buches (evtl. etwas verspätet gelesen): nur am Anfang neu beginnen
+      if (st.verse <= 1) startChapter(1, 1);
+      return;
+    }
+    if (n === 1 && st.book < 66 && st.chapter > 1) {
+      // „1“ nach mehreren Kapiteln: neues Buch, dessen Titel nicht lesbar war
       const next = st.book + 1;
       notes.fallbacks.push(`Seite ${pageNo}: Buchanfang ohne erkannten Titel → als „${BOOKS[next - 1].name}“ eingeordnet`);
       startBook(next, 'ohne Titel erkannt');
       if (next !== 19) startChapter(1, 1);
       return;
     }
+    if (n <= st.chapter) return; // verspätet gelesene Kapitelzahl – Kapitel läuft schon
     if (st.book === 19) return; // Psalmen beginnen mit „Psalm N“
     if (n > st.chapter && n <= st.chapter + 3) startChapter(n, 1);
   }
@@ -478,7 +494,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     const smallChars = items.filter((i) => i.size < body * 0.88).reduce((n, i) => n + i.s.trim().length, 0);
     if (smallChars / chars > 0.6) {
       const t = joinText(items);
-      if (REF_LIST.test(t)) pendingRefs.push(...parseRefList(t));
+      if (isRefLine(t)) pendingRefs.push(...parseRefList(t));
       skipped();
       return;
     }
@@ -524,7 +540,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       skipped();
       return;
     }
-    if (REF_LIST.test(text)) {
+    if (isRefLine(text)) {
       // Parallelstellen („2Kor 1,1-2; Kol 1,3“) – nie Verstext, und ihre Zahlen sind keine Versnummern.
       // Sie werden als Querverweise für den folgenden Vers gemerkt.
       pendingRefs.push(...parseRefList(text));
@@ -548,7 +564,9 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       }
       let s = g.s;
       const m = s.match(/^\s*(\d{1,3})(?!\d)\s*(.*)$/s);
-      if (m) {
+      // „2Kor 3,1“ / „1Sam 5“: Zahl gehört zu einer Buchabkürzung, ist also keine Versnummer
+      if (m && /^[A-ZÄÖÜ][a-zäöü]{0,4}\.?\s*\d/.test(m[2])) m.length = 0;
+      if (m && m.length) {
         const n = parseInt(m[1], 10);
         const expected = st.verse + 1;
         const plausible = n >= expected && n <= expected + 2;
@@ -558,8 +576,8 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
           setVerse(n);
           s = m[2];
         } else if (
-          !plausible && st.chapter && g.font !== bodyFont && st.verse >= 3 &&
-          (n === 1 || (n === 2 && st.book !== 19))
+          !plausible && st.chapter && marked && st.verse >= 3 &&
+          (n === 1 || (n === 2 && st.book !== 19)) && /^[A-ZÄÖÜ»„"(]/.test(m[2] || 'X')
         ) {
           if (chapterReset(n)) s = m[2];
         }
