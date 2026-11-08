@@ -1,7 +1,7 @@
 // Offline-Unterstützung mit „ganzen“ Updates:
 // Eine neue Version wird beim Installieren komplett heruntergeladen (am Browser-Cache vorbei)
 // und erst dann aktiviert. So können nie Dateien aus verschiedenen Versionen gemischt werden.
-const VERSION = 'bibelstudium-v19';
+const VERSION = 'bibelstudium-v20';
 const DATA_CACHE = 'bibelstudium-daten'; // Bibeltexte, Querverweise, PDF-Leser – ändern sich nie
 const SHELL = [
   './',
@@ -40,10 +40,16 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== DATA_CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
+    (async () => {
+      const old = (await caches.keys()).filter((k) => k !== VERSION && k !== DATA_CACHE);
+      await Promise.all(old.map((k) => caches.delete(k)));
+      await self.clients.claim();
+      // Selbstheilung bei einem Update: offene Fenster – auch eine hängende alte Version – neu laden
+      if (old.length) {
+        const list = await self.clients.matchAll({ type: 'window' });
+        await Promise.all(list.map((c) => c.navigate(c.url).catch(() => {})));
+      }
+    })()
   );
 });
 

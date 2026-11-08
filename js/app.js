@@ -24,7 +24,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '19 · 08.11.2026';
+export const APP_VERSION = '20 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
