@@ -24,7 +24,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '11 · 08.11.2026';
+export const APP_VERSION = '12 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -102,7 +102,12 @@ async function setHighlight(sel, color) {
 // ---------------------------------------------------------------------------
 // Notizen
 // ---------------------------------------------------------------------------
+const refSigs = new Map(); // Notiz-ID -> Bibelstellen beim letzten Speichern
+
 async function persistNote(n) {
+  const sig = JSON.stringify(n.refs || []) + '|' + (n.title || '');
+  const refsChanged = refSigs.get(n.id) !== sig;
+  refSigs.set(n.id, sig);
   if (isEmpty(n)) {
     if (state.notes.has(n.id)) {
       state.notes.delete(n.id);
@@ -113,7 +118,7 @@ async function persistNote(n) {
     await db.put('notes', n);
   }
   writeLS('lastNote', n.id);
-  bible.applyMarks();
+  if (refsChanged) bible.applyMarks();
   renderDrawer();
 }
 

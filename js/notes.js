@@ -726,8 +726,12 @@ export class NotesEditor {
 class Ink {
   constructor(editor) {
     this.ed = editor;
+    // Zwei Ebenen: „base“ = fertige Zeichnung, „live“ = der Strich, der gerade entsteht.
+    // So wird beim Schreiben nur der neue Strich gemalt statt der ganzen Zeichnung.
     this.canvas = $('#ink');
     this.ctx = this.canvas.getContext('2d');
+    this.live = $('#ink-live');
+    this.lctx = this.live.getContext('2d');
     this.strokes = [];
     this.undoStack = [];
     this.tool = 'pen';
@@ -737,6 +741,8 @@ class Ink {
     this.current = null;
     this.pan = null;
     this.raf = 0;
+    this.liveRaf = 0;
+    this.geo = null;
     this.bind();
     this.buildTools();
   }
@@ -809,10 +815,18 @@ class Ink {
     this.ed.changed();
   }
 
+  /** Lage der Notizseite einmal messen (statt bei jedem Stiftpunkt) */
+  measure() {
+    const br = this.ed.el.body.getBoundingClientRect();
+    const pr = this.ed.el.page.getBoundingClientRect();
+    this.geo = { pageLeft: pr.left, pageTop: pr.top, ox: pr.left - br.left, oy: pr.top - br.top, h: br.height };
+    return this.geo;
+  }
+
   // Koordinaten relativ zur Notiz-Seite (scrollen + Breitenänderung bleiben stimmig)
   toPage(e) {
-    const r = this.ed.el.page.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
+    const g = this.geo || this.measure();
+    return [e.clientX - g.pageLeft, e.clientY - g.pageTop];
   }
 
   /** Stift ist gerade aktiv (oder war es eben noch) -> Handballen ignorieren */
@@ -820,9 +834,12 @@ class Ink {
     return !!this.current?.pen || Date.now() - this.lastPen < PALM_GRACE_MS;
   }
 
-  /** Während mit dem Pencil geschrieben wird: keine Textauswahl/Kopieren-Menü irgendwo */
-  markInking() {
-    document.body.classList.add('inking');
+  /** Während mit dem Pencil geschrieben wird: keine Textauswahl/Kopieren-Menü (einmal pro Strich setzen) */
+  startInking() {
+    clearTimeout(this.inkingTimer);
+    if (!document.body.classList.contains('inking')) document.body.classList.add('inking');
+  }
+  stopInkingSoon() {
     clearTimeout(this.inkingTimer);
     this.inkingTimer = setTimeout(() => {
       if (!this.current?.pen) document.body.classList.remove('inking');
@@ -834,7 +851,11 @@ class Ink {
     this.redoStack = [];
     this.lastPen = 0;
     new ResizeObserver(() => this.resize()).observe(this.ed.el.body);
-    this.ed.el.scroll.addEventListener('scroll', () => this.schedule(), { passive: true });
+    this.ed.el.scroll.addEventListener('scroll', () => {
+      this.geo = null; // Lage hat sich geändert
+      this.schedule();
+      if (this.current) this.scheduleLive(true);
+    }, { passive: true });
 
     // Lange Berührungen (Handballen) dürfen weder Lupe noch Kopieren-Menü öffnen
     c.addEventListener('touchstart', (e) => {
@@ -850,7 +871,7 @@ class Ink {
       if (isPen) {
         this.lastPen = Date.now();
         this.pan = null; // Hand hat evtl. zuerst aufgesetzt -> Scrollen abbrechen
-        this.markInking();
+        this.startInking();
         if (!this.pencilOnly) {
           // Apple Pencil erkannt: ab jetzt zeichnet nur noch der Stift
           this.setPencilOnly(true);
@@ -868,6 +889,7 @@ class Ink {
       }
       if (this.current) return;
       capture(c, e.pointerId);
+      this.measure();
       const [x, y] = this.toPage(e);
       if (this.tool === 'eraser') {
         this.pushUndo();
@@ -877,13 +899,14 @@ class Ink {
       }
       this.pushUndo();
       const pr = isPen ? e.pressure || 0.5 : 0.5;
+      // Der neue Strich kommt erst beim Absetzen in die fertige Zeichnung
       this.current = {
         id: e.pointerId,
         pen: isPen,
+        drawn: 0,
         s: { t: this.tool, c: this.color, w: this.width, p: [r1(x), r1(y), r2(pr)] },
       };
-      this.strokes.push(this.current.s);
-      this.schedule();
+      this.scheduleLive();
     });
 
     c.addEventListener('pointermove', (e) => {
@@ -892,26 +915,24 @@ class Ink {
         this.ed.el.scroll.scrollTop = this.pan.top - (e.clientY - this.pan.y);
         return;
       }
-      if (!this.current || e.pointerId !== this.current.id) return;
-      if (this.current.pen) {
-        this.lastPen = Date.now();
-        this.markInking();
-      }
+      const cur = this.current;
+      if (!cur || e.pointerId !== cur.id) return;
+      if (cur.pen) this.lastPen = Date.now();
       const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      const p = cur.s ? cur.s.p : null;
       for (const ev of events.length ? events : [e]) {
         const [x, y] = this.toPage(ev);
-        if (this.current.eraser) {
+        if (cur.eraser) {
           this.erase(x, y);
           continue;
         }
-        const p = this.current.s.p;
         const lx = p[p.length - 3];
         const ly = p[p.length - 2];
-        if (Math.hypot(x - lx, y - ly) < 0.8) continue;
+        if ((x - lx) * (x - lx) + (y - ly) * (y - ly) < 0.64) continue;
         const pr = ev.pointerType === 'pen' ? ev.pressure || 0.5 : 0.5;
         p.push(r1(x), r1(y), r2(pr));
       }
-      this.schedule();
+      if (!cur.eraser) this.scheduleLive();
     });
 
     const end = (e) => {
@@ -919,22 +940,35 @@ class Ink {
         this.pan = null;
         return;
       }
-      if (!this.current || e.pointerId !== this.current.id) return;
       const cur = this.current;
+      if (!cur || e.pointerId !== cur.id) return;
       this.current = null;
       if (cur.pen) {
         this.lastPen = Date.now();
-        this.markInking();
+        this.stopInkingSoon();
       }
       if (cur.eraser) {
         if (this.undoStack.length && this.undoStack[this.undoStack.length - 1].length === this.strokes.length) this.undoStack.pop();
         else this.ed.changed();
         return;
       }
+      cancelAnimationFrame(this.liveRaf);
+      this.liveRaf = 0;
+      this.clearLive();
       if (cur.s.t === 'pen' && this.scratchOut(cur.s)) {
         toast('Durchgestrichenes gelöscht · Rückgängig mit 2-Finger-Tipp');
+        this.changed(); // ganze Zeichnung neu (Teile wurden gelöscht)
+        return;
       }
-      this.changed();
+      // Strich in die fertige Zeichnung übernehmen – ohne alles neu zu malen
+      this.strokes.push(cur.s);
+      if (this.raf) {
+        // ein vollständiges Neuzeichnen steht ohnehin an
+      } else {
+        this.prepare(this.ctx);
+        this.drawStroke(this.ctx, cur.s);
+      }
+      this.ed.changed();
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
@@ -1027,12 +1061,27 @@ class Ink {
   resize() {
     const r = this.ed.el.body.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.canvas.width = Math.round(r.width * dpr);
-    this.canvas.height = Math.round(r.height * dpr);
+    for (const cv of [this.canvas, this.live]) {
+      cv.width = Math.round(r.width * dpr);
+      cv.height = Math.round(r.height * dpr);
+    }
     this.dpr = dpr;
+    this.geo = null;
     this.schedule();
+    if (this.current) this.scheduleLive(true);
   }
 
+  /** Zeichenfläche auf die Seitenkoordinaten einstellen */
+  prepare(ctx) {
+    const dpr = this.dpr || 1;
+    const g = this.geo || this.measure();
+    ctx.setTransform(dpr, 0, 0, dpr, g.ox * dpr, g.oy * dpr);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    return g;
+  }
+
+  // ---------------------------------------------------------------- fertige Zeichnung
   schedule() {
     if (this.raf) return;
     this.raf = requestAnimationFrame(() => {
@@ -1043,24 +1092,15 @@ class Ink {
 
   draw() {
     const ctx = this.ctx;
-    const dpr = this.dpr || 1;
-    const br = this.ed.el.body.getBoundingClientRect();
-    const pr = this.ed.el.page.getBoundingClientRect();
-    const ox = pr.left - br.left;
-    const oy = pr.top - br.top;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.setTransform(dpr, 0, 0, dpr, ox * dpr, oy * dpr);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    const minY = -oy - 50;
-    const maxY = -oy + br.height + 50;
+    const g = this.prepare(ctx);
+    const minY = -g.oy - 50;
+    const maxY = -g.oy + g.h + 50;
     for (const s of this.strokes) {
-      const p = s.p;
-      // nur sichtbare Striche zeichnen
-      let visible = false;
-      for (let i = 1; i < p.length; i += 30) if (p[i] > minY && p[i] < maxY) { visible = true; break; }
-      if (!visible && !(p[p.length - 2] > minY && p[p.length - 2] < maxY)) continue;
+      let box = BOXES.get(s);
+      if (!box) BOXES.set(s, (box = bbox(s.p)));
+      if (box[3] < minY || box[1] > maxY) continue; // nur sichtbare Striche zeichnen
       this.drawStroke(ctx, s);
     }
     // Lösch-Animation (ausblenden + leicht schrumpfen)
@@ -1069,20 +1109,53 @@ class Ink {
       if (t >= 1) {
         this.fading = null;
       } else {
-        ctx.save();
         for (const s of this.fading.strokes) {
           ctx.globalAlpha = 1 - t;
-          const fadeStroke = { ...s, c: t < 0.35 ? '#ff6b6b' : s.c, w: s.w * (1 - t * 0.6) };
-          this.drawStroke(ctx, fadeStroke);
+          this.drawStroke(ctx, { ...s, c: t < 0.35 ? '#ff6b6b' : s.c, w: s.w * (1 - t * 0.6) });
           ctx.globalAlpha = 1;
         }
-        ctx.restore();
         this.schedule();
       }
     }
   }
 
-  drawStroke(ctx, s) {
+  // ---------------------------------------------------------------- Strich, der gerade entsteht
+  clearLive() {
+    this.lctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.lctx.clearRect(0, 0, this.live.width, this.live.height);
+  }
+
+  scheduleLive(full = false) {
+    if (full && this.current) this.current.drawn = 0;
+    if (this.liveRaf) return;
+    this.liveRaf = requestAnimationFrame(() => {
+      this.liveRaf = 0;
+      this.drawLive();
+    });
+  }
+
+  drawLive() {
+    const cur = this.current;
+    if (!cur || !cur.s) return;
+    const ctx = this.lctx;
+    const s = cur.s;
+    if (s.t === 'marker' || cur.drawn === 0) {
+      // Textmarker (halbtransparent) immer komplett, sonst würden Überlappungen dunkler
+      this.clearLive();
+      this.prepare(ctx);
+      this.drawStroke(ctx, s);
+    } else {
+      this.prepare(ctx);
+      this.drawStroke(ctx, s, cur.drawn); // nur die neuen Stücke
+    }
+    cur.drawn = s.p.length;
+  }
+
+  /**
+   * Strich zeichnen. Abschnitte mit gleicher Breite werden zu einem Pfad zusammengefasst (schnell).
+   * @param {number} from ab welchem Punkt-Index (für das schrittweise Zeichnen des aktuellen Strichs)
+   */
+  drawStroke(ctx, s, from = 0) {
     const p = s.p;
     if (s.t === 'marker') {
       ctx.globalAlpha = 0.35;
@@ -1107,25 +1180,45 @@ class Ink {
       return;
     }
     // geglättete Linie mit druckabhängiger Breite
-    for (let i = 3; i < p.length; i += 3) {
+    let width = -1;
+    let open = false;
+    const startAt = Math.max(3, from - 3);
+    for (let i = startAt; i < p.length; i += 3) {
       const x0 = p[i - 3], y0 = p[i - 2];
       const x1 = p[i], y1 = p[i + 1];
-      const prs = (p[i - 1] + p[i + 2]) / 2;
-      ctx.lineWidth = s.w * (0.45 + prs * 1.1);
-      ctx.beginPath();
-      if (i >= 6) {
-        const mx0 = (p[i - 6] + x0) / 2, my0 = (p[i - 5] + y0) / 2;
-        const mx1 = (x0 + x1) / 2, my1 = (y0 + y1) / 2;
-        ctx.moveTo(mx0, my0);
-        ctx.quadraticCurveTo(x0, y0, mx1, my1);
-        if (i === p.length - 3) ctx.lineTo(x1, y1);
-      } else {
-        ctx.moveTo(x0, y0);
-        ctx.lineTo((x0 + x1) / 2, (y0 + y1) / 2);
+      const w = Math.round(s.w * (0.45 + ((p[i - 1] + p[i + 2]) / 2) * 1.1) * 4) / 4;
+      const sx = i >= 6 ? (p[i - 6] + x0) / 2 : x0;
+      const sy = i >= 6 ? (p[i - 5] + y0) / 2 : y0;
+      if (w !== width) {
+        if (open) ctx.stroke();
+        ctx.lineWidth = w;
+        width = w;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        open = true;
       }
-      ctx.stroke();
+      const mx = (x0 + x1) / 2;
+      const my = (y0 + y1) / 2;
+      if (i >= 6) ctx.quadraticCurveTo(x0, y0, mx, my);
+      else ctx.lineTo(mx, my);
+      if (i === p.length - 3) ctx.lineTo(x1, y1);
     }
+    if (open) ctx.stroke();
   }
+}
+
+const BOXES = new WeakMap(); // Strich -> Begrenzungsrahmen (zwischengespeichert)
+
+/** Begrenzungsrahmen eines Strichs [minX, minY, maxX, maxY] */
+function bbox(p) {
+  let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+  for (let i = 0; i < p.length; i += 3) {
+    if (p[i] < a) a = p[i];
+    if (p[i] > c) c = p[i];
+    if (p[i + 1] < b) b = p[i + 1];
+    if (p[i + 1] > d) d = p[i + 1];
+  }
+  return [a, b, c, d];
 }
 
 const r1 = (n) => Math.round(n * 10) / 10;

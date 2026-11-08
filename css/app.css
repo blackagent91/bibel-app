@@ -265,13 +265,14 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; touch-action: none; }
 .note-body.drawing .ink { pointer-events: auto; cursor: crosshair; }
+.ink.ink-live, .note-body.drawing .ink.ink-live { pointer-events: none; }
 .note-body.drawing .editor { caret-color: transparent; }
 /* Stift-Modus: Handballen darf keine Textauswahl / kein Kopieren-Menü auslösen */
 .note-body.drawing, .note-body.drawing * {
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
 /* Während mit dem Pencil geschrieben wird, reagiert auch die Bibelseite nicht auf die Hand */
-body.inking, body.inking * { -webkit-user-select: none !important; user-select: none !important; -webkit-touch-callout: none !important; }
+body.inking { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 body.inking .bible-pane, body.inking .sel-menu { pointer-events: none; }
 
 .block-handle {
