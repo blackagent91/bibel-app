@@ -1,6 +1,6 @@
 // Rechte Seite: Bibeltext, Inhaltsverzeichnis, Navigation, Auswahl, Suche
 import { BOOKS, getBook, parseRef, formatRef } from './books.js';
-import { getChapter, getBookData, getTranslation } from './translations.js';
+import { getChapter, getBookData, getTranslation, chapterCount } from './translations.js';
 import { $, $$, esc, COLORS } from './util.js';
 
 export class BibleView {
@@ -49,7 +49,7 @@ export class BibleView {
   async goto(ref, { push = true, flash = true } = {}) {
     const b = getBook(ref.book);
     if (!b) return;
-    const pos = { book: b.id, chapter: Math.min(Math.max(ref.chapter || 1, 1), b.chapters) };
+    const pos = { book: b.id, chapter: Math.min(Math.max(ref.chapter || 1, 1), this.chapters(b.id)) };
     const same = pos.book === this.pos.book && pos.chapter === this.pos.chapter && this.verses.length;
     if (push) {
       this.history = this.history.slice(0, this.hIdx + 1);
@@ -67,6 +67,10 @@ export class BibleView {
     this.o.onNavigate?.(this.pos);
   }
 
+  chapters(bookId) {
+    return chapterCount(this.trans, bookId);
+  }
+
   back() {
     if (this.hIdx > 0) this.goto(this.history[--this.hIdx], { push: false });
   }
@@ -79,8 +83,8 @@ export class BibleView {
     if (chapter < 1) {
       if (book === 1) return;
       book -= 1;
-      chapter = getBook(book).chapters;
-    } else if (chapter > getBook(book).chapters) {
+      chapter = this.chapters(book);
+    } else if (chapter > this.chapters(book)) {
       if (book === 66) return;
       book += 1;
       chapter = 1;
@@ -107,7 +111,7 @@ export class BibleView {
     this.el.back.disabled = this.hIdx <= 0;
     this.el.fwd.disabled = this.hIdx >= this.history.length - 1;
     $('#ch-prev').disabled = this.pos.book === 1 && this.pos.chapter === 1;
-    $('#ch-next').disabled = this.pos.book === 66 && this.pos.chapter === getBook(66).chapters;
+    $('#ch-next').disabled = this.pos.book === 66 && this.pos.chapter === this.chapters(66);
   }
 
   // ------------------------------------------------------------------ Darstellung
@@ -437,7 +441,7 @@ export class BibleView {
         this.goto({ book: +ch.dataset.b, chapter: +ch.dataset.chapter });
       } else if (bk) {
         const b = getBook(+bk.dataset.book);
-        if (b.chapters === 1) {
+        if (this.chapters(b.id) === 1) {
           this.closeToc();
           this.goto({ book: b.id, chapter: 1 });
         } else this.renderChapters(b.id);
@@ -456,7 +460,7 @@ export class BibleView {
     const section = (title, list) =>
       list.length
         ? `<div class="toc-section"><h4>${title}</h4><div class="book-grid">${list
-            .map((b) => `<button class="book-btn${b.id === this.pos.book ? ' current' : ''}" data-book="${b.id}"><b>${esc(b.name)}</b><span>${b.abbr} · ${b.chapters} Kap.</span></button>`)
+            .map((b) => `<button class="book-btn${b.id === this.pos.book ? ' current' : ''}" data-book="${b.id}"><b>${esc(b.name)}</b><span>${b.abbr} · ${this.chapters(b.id)} Kap.</span></button>`)
             .join('')}</div></div>`
         : '';
     const at = BOOKS.filter((b) => b.testament === 'AT' && match(b));
@@ -468,7 +472,7 @@ export class BibleView {
     const b = getBook(bookId);
     const withNotes = this.o.chaptersWithNotes(bookId);
     let html = `<div class="toc-chapters-head"><button class="icon-btn" data-back aria-label="Zurück"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h3>${esc(b.name)}</h3></div><div class="chapter-grid">`;
-    for (let c = 1; c <= b.chapters; c++) {
+    for (let c = 1; c <= this.chapters(b.id); c++) {
       const cur = b.id === this.pos.book && c === this.pos.chapter;
       html += `<button class="ch-btn${cur ? ' current' : ''}${withNotes.has(c) ? ' has-notes' : ''}" data-b="${b.id}" data-chapter="${c}">${c}</button>`;
     }

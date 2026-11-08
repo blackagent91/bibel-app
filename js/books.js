@@ -123,7 +123,7 @@ export function parseRef(input) {
   if (!m) return null;
   const book = findBook(m[1]);
   if (!book) return null;
-  const chapter = Math.min(Math.max(parseInt(m[2] || '1', 10), 1), book.chapters);
+  const chapter = Math.min(Math.max(parseInt(m[2] || '1', 10), 1), 150); // genaue Grenze prüft die Bibelansicht
   const res = { book: book.id, chapter };
   if (m[3]) {
     res.vs = parseInt(m[3], 10);

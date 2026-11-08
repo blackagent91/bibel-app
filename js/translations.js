@@ -73,18 +73,22 @@ export async function deleteImported(id) {
  * Importiert eine Datei (Zefania-XML oder JSON) und speichert sie lokal.
  * @returns {Promise<{id, name, verses:number}>}
  */
-export async function importBibleFile(file) {
-  const text = await file.text();
-  const trimmed = text.trimStart();
+export async function importBibleFile(file, { onProgress, signal, name: customName } = {}) {
   let parsed;
-  if (trimmed.startsWith('<')) parsed = parseXml(text);
-  else parsed = parseJson(JSON.parse(text));
+  if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+    const { parseBiblePdf } = await import('./pdfimport.js');
+    parsed = await parseBiblePdf(file, onProgress, signal);
+  } else {
+    const text = await file.text();
+    if (text.trimStart().startsWith('<')) parsed = parseXml(text);
+    else parsed = parseJson(JSON.parse(text));
+  }
 
   if (!parsed || !parsed.books.some(Boolean)) {
     throw new Error('In der Datei wurden keine Bibelverse gefunden.');
   }
-  const fallbackName = file.name.replace(/\.(xml|json)$/i, '');
-  const name = (parsed.name || fallbackName).trim();
+  const fallbackName = file.name.replace(/\.(xml|json|pdf)$/i, '');
+  const name = (customName?.(parsed.name || fallbackName) || parsed.name || fallbackName).trim();
   const entry = {
     id: uid('bib_'),
     name,
@@ -96,7 +100,14 @@ export async function importBibleFile(file) {
   imported.push(entry);
   let verses = 0;
   for (const b of parsed.books) if (b) for (const c of b) if (c) verses += c.filter(Boolean).length;
-  return { id: entry.id, name, verses };
+  return { id: entry.id, name, verses, report: parsed.report };
+}
+
+/** Kapitelanzahl eines Buches in einer Übersetzung (Traditionen unterscheiden sich, z. B. Joel 3/4) */
+export function chapterCount(transId, bookId) {
+  const t = imported.find((x) => x.id === transId);
+  const n = t?.books?.[bookId - 1]?.length;
+  return n || BOOKS[bookId - 1].chapters;
 }
 
 function makeShort(name) {

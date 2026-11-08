@@ -46,8 +46,13 @@ Eingebaut ist die **Elberfelder 1905** (gemeinfrei). Die Schlachter 2000 ist
 urheberrechtlich geschützt und deshalb nicht enthalten.
 
 Eigene Bibel importieren: **Einstellungen → Bibel-Datei importieren**. Das geht mit
-**Zefania-XML**, **OSIS-XML** und gängigen **JSON**-Formaten. Die importierte Bibel
-bleibt nur auf deinem Gerät und wird nirgends hochgeladen.
+**PDF**, **Zefania-XML**, **OSIS-XML** und gängigen **JSON**-Formaten. Die importierte
+Bibel bleibt nur auf deinem Gerät und wird nirgends hochgeladen.
+
+Beim **PDF-Import** erkennt die App Buchtitel, Kapitelanfänge (große Zahl bzw. „Psalm N“)
+und Versnummern. Kopfzeilen, Zwischenüberschriften, Parallelstellen und Fußnoten werden
+übersprungen. Nach dem Import zeigt ein Prüfbericht, ob alle Bücher und Kapitel erkannt wurden.
+Zum Auslesen dient [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0, im Ordner `vendor/pdfjs`).
 
 ## Daten & Sicherung
 

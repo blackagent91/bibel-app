@@ -443,19 +443,66 @@ function bindSettings() {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    toast('Importiere … das kann einen Moment dauern', 8000);
+    $('#settings').classList.add('hidden');
+    const modal = $('#import-modal');
+    const signal = { cancelled: false };
+    $('#import-title').textContent = 'Bibel wird importiert …';
+    $('#import-progress').classList.remove('hidden');
+    $('#import-result').classList.add('hidden');
+    $('#import-status').textContent = `„${file.name}“ wird geöffnet …`;
+    $('#import-bar').style.width = '0%';
+    $('#import-cancel').onclick = () => {
+      signal.cancelled = true;
+    };
+    modal.classList.remove('hidden');
     try {
-      const res = await importBibleFile(file);
+      const res = await importBibleFile(file, {
+        signal,
+        onProgress: ({ page, pages, book }) => {
+          $('#import-bar').style.width = `${Math.round((page / pages) * 100)}%`;
+          $('#import-status').textContent = `Seite ${page} von ${pages}${book ? ` · ${getBook(book).name}` : ''}`;
+        },
+        name: (suggested) => prompt('Wie soll die Übersetzung heißen?', suggested) || suggested,
+      });
       settings.trans = res.id;
       saveSettings();
       renderTranslations();
       await bible.setTranslation(res.id);
-      toast(`„${res.name}“ importiert (${res.verses.toLocaleString('de-DE')} Verse)`, 4000);
+      showImportResult(res);
     } catch (err) {
       console.error(err);
+      modal.classList.add('hidden');
       toast(`Import fehlgeschlagen: ${err.message}`, 6000);
     }
   });
+
+  function showImportResult(res) {
+    const r = res.report;
+    $('#import-title').textContent = `„${res.name}“ importiert`;
+    $('#import-progress').classList.add('hidden');
+    const box = $('#import-result');
+    box.classList.remove('hidden');
+    let html = '';
+    if (r) {
+      html += `<div class="report-stats">
+        <div><b>${r.books}/66</b><span>Bücher</span></div>
+        <div><b>${r.chapters.toLocaleString('de-DE')}</b><span>Kapitel</span></div>
+        <div><b>${r.verses.toLocaleString('de-DE')}</b><span>Verse</span></div></div>`;
+      const issues = [
+        ...(r.missingBooks.length ? [`Nicht gefunden: ${r.missingBooks.join(', ')}`] : []),
+        ...r.chapterIssues,
+      ];
+      html += issues.length
+        ? `<p class="hint">Folgendes konnte nicht vollständig erkannt werden – diese Stellen fehlen oder sind unvollständig:</p><div class="report-list">${issues.map(esc).join('<br>')}</div>`
+        : `<p class="report-ok">✓ Alle Bücher und Kapitel wurden erkannt.</p>`;
+      html += `<p class="hint">Stichprobe: Schau dir ein paar Kapitel an. Wenn irgendwo Überschriften oder Fußnoten im Text stehen, sag Bescheid.</p>`;
+    } else {
+      html += `<p class="report-ok">✓ ${res.verses.toLocaleString('de-DE')} Verse importiert.</p>`;
+    }
+    html += `<div class="row-btns"><button class="btn primary" id="import-done">Fertig</button></div>`;
+    box.innerHTML = html;
+    $('#import-done').onclick = () => $('#import-modal').classList.add('hidden');
+  }
 
   $('#trans-list').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-del-trans]');
