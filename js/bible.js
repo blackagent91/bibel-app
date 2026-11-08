@@ -114,8 +114,10 @@ export class BibleView {
     this.el.refLabel.textContent = `${b.name} ${this.pos.chapter}`;
     this.el.back.disabled = this.hIdx <= 0;
     this.el.fwd.disabled = this.hIdx >= this.history.length - 1;
-    $('#ch-prev').disabled = this.pos.book === 1 && this.pos.chapter === 1;
-    $('#ch-next').disabled = this.pos.book === 66 && this.pos.chapter === this.chapters(66);
+    const first = this.pos.book === 1 && this.pos.chapter === 1;
+    const last = this.pos.book === 66 && this.pos.chapter === this.chapters(66);
+    $('#ch-prev').disabled = $('#ch-prev-top').disabled = first;
+    $('#ch-next').disabled = $('#ch-next-top').disabled = last;
   }
 
   // ------------------------------------------------------------------ Darstellung
@@ -304,8 +306,8 @@ export class BibleView {
     const { text, scroll } = this.el;
     this.el.back.onclick = () => this.back();
     this.el.fwd.onclick = () => this.forward();
-    $('#ch-prev').onclick = () => this.step(-1);
-    $('#ch-next').onclick = () => this.step(1);
+    $('#ch-prev').onclick = $('#ch-prev-top').onclick = () => this.step(-1);
+    $('#ch-next').onclick = $('#ch-next-top').onclick = () => this.step(1);
     $('#ref-btn').onclick = () => this.openToc();
     $('#toc-close').onclick = () => this.closeToc();
     $('#btn-search').onclick = () => this.openSearch();

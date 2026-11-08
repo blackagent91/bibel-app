@@ -8,7 +8,8 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 **Bibel (rechts)**
 - Inhaltsverzeichnis mit allen 66 Büchern und Kapiteln (Tippen auf den Stellen-Knopf oben)
 - Schnellsprung per Eingabe: `1Mo 5`, `1. Mose 4`, `Joh 3,16`, `Röm 8,28-30`, `Ps 23`
-- Zurück/Vorwärts-Verlauf, Kapitel blättern (auch mit ← → auf der Tastatur)
+- Kapitel blättern: die kleinen Pfeile ‹ › direkt neben der Stellenangabe oben (immer sichtbar, auch mit ← → auf der Tastatur)
+- Verlauf: die Pfeile ← → ganz links springen zur vorher angesehenen Stelle zurück bzw. wieder vor
 - Volltextsuche (ganze Bibel, AT, NT oder aktuelles Buch)
 - Vers antippen → Vers ist ausgewählt; zweiten Vers antippen → Bereich (z. B. 16–18)
 - Am Desktop geht auch normales Markieren mit der Maus

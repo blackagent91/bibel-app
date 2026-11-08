@@ -259,16 +259,24 @@
     <section id="bible-pane" class="pane bible-pane" aria-label="Bibel">
       <header class="pane-head">
         <div class="head-row">
-          <button class="icon-btn" id="nav-back" title="Zurück" aria-label="Zurück">
-            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+          <button class="icon-btn" id="nav-back" title="Zurück zur vorher angesehenen Stelle" aria-label="Zurück zur vorherigen Stelle">
+            <svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
           </button>
-          <button class="icon-btn" id="nav-fwd" title="Vorwärts" aria-label="Vorwärts">
-            <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <button class="icon-btn" id="nav-fwd" title="Wieder vorwärts" aria-label="Vorwärts">
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
-          <button class="ref-btn" id="ref-btn" title="Inhaltsverzeichnis öffnen">
-            <span id="ref-label">1. Mose 1</span>
-            <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-          </button>
+          <div class="ref-group">
+            <button class="ref-step" id="ch-prev-top" title="Vorheriges Kapitel" aria-label="Vorheriges Kapitel">
+              <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <button class="ref-btn" id="ref-btn" title="Inhaltsverzeichnis öffnen">
+              <span id="ref-label">1. Mose 1</span>
+              <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <button class="ref-step" id="ch-next-top" title="Nächstes Kapitel" aria-label="Nächstes Kapitel">
+              <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
           <span class="spacer"></span>
           <select id="translation" class="tool-select trans-select" title="Übersetzung"></select>
           <button class="icon-btn focus-btn" data-focus="bible" title="Bibel im Vollbild" aria-label="Bibel im Vollbild">
