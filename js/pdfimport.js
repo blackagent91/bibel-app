@@ -149,10 +149,19 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
 
   // Vorlage: Kapitel- und Verszahlen jedes Buches (aus der eingebauten Elberfelder).
   // Damit werden Kapitel- und Buchwechsel geprüft – Übersetzungen weichen nur minimal ab.
+  // Zwei Vorlagen: deutsche Verszählung (Schlachter/Luther-Tradition) und die der Elberfelder.
+  // Deutsche Bibeln teilen manche Kapitel anders (z. B. 2. Mose 7/8, Joel 3/4 Kapitel).
   let VC = null;
+  let VCDE = null;
   try { VC = await (await fetch('data/versecounts.json')).json(); } catch {}
-  const expVerses = (b, c) => VC?.[b - 1]?.[c - 1] || 0;
-  const maxChapters = (b) => (b === 29 ? 4 : BOOKS[b - 1].chapters); // Joel: 3 oder 4 Kapitel
+  try { VCDE = await (await fetch('data/versecounts-de.json')).json(); } catch {}
+  // für die Plausibilität die kleinere der beiden Verszahlen (großzügig)
+  const expVerses = (b, c) => {
+    const a = VC?.[b - 1]?.[c - 1] || 0;
+    const d = VCDE?.[b - 1]?.[c - 1] || 0;
+    return a && d ? Math.min(a, d) : a || d;
+  };
+  const maxChapters = (b) => VCDE?.[b - 1]?.length || (b === 29 ? 4 : BOOKS[b - 1].chapters);
 
   const books = [];
   const xrefs = {}; // "Buch:Kapitel:Vers" -> ["43.15.18-19", …] (Stellen unter den Zwischenüberschriften)
@@ -295,14 +304,19 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   }
   const xrefCount = Object.values(xrefs).reduce((n, l) => n + l.length, 0);
   if (notes.resets) notes.fallbacks.push(`${notes.resets} Kapitelanfänge über die Versnummern erkannt (die große Kapitelzahl war im PDF nicht lesbar)`);
+  // Abgleich: nur melden, was zu KEINER der beiden Verszählungen passt
   const deviations = [];
-  if (VC) {
+  if (VC || VCDE) {
     out.forEach((b, i) => {
       if (!b) return;
       b.forEach((c, ci) => {
-        const exp = VC[i][ci];
         const got = (c || []).filter(Boolean).length;
-        if (exp && Math.abs(got - exp) > 2) deviations.push({ book: i + 1, chapter: ci + 1, got, exp });
+        const refs = [VCDE?.[i]?.[ci], VC?.[i]?.[ci]].filter(Boolean);
+        if (!refs.length) {
+          deviations.push({ book: i + 1, chapter: ci + 1, got, exp: 0 });
+          return;
+        }
+        if (refs.every((exp) => Math.abs(got - exp) > 2)) deviations.push({ book: i + 1, chapter: ci + 1, got, exp: refs[0] });
       });
     });
   }

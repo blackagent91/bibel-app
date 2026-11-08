@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '29 · 08.11.2026';
+export const APP_VERSION = '30 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -687,10 +687,10 @@ function bindSettings() {
       if (extra.length) html += `<p class="hint">Hinweise (für die Fehlersuche):</p><div class="report-list">${extra.map(esc).join('<br>')}</div>`;
       if (skipped.length) html += `<p class="hint">Übersprungen (Vorwort/Anhang, kein Bibeltext): ${skipped.length} Abschnitt${skipped.length > 1 ? 'e' : ''}</p>`;
       if (r.deviations?.length) {
-        html += `<p class="hint">Abgleich mit der Vorlage – ${r.deviations.length} Kapitel mit deutlich anderer Verszahl. Tippe zum Prüfen (kleine Unterschiede in der Verszählung sind zwischen Übersetzungen normal):</p>
+        html += `<p class="hint">Abgleich mit der Vorlage (deutsche und Elberfelder-Verszählung) – ${r.deviations.length} Kapitel passen zu keiner von beiden. Tippe zum Prüfen:</p>
           <div class="report-list">${r.deviations
             .slice(0, 80)
-            .map((d) => `<button class="dev-item" data-dev="${d.book}:${d.chapter}">${esc(getBook(d.book).name)} ${d.chapter}: ${d.got} statt ${d.exp} Verse</button>`)
+            .map((d) => `<button class="dev-item" data-dev="${d.book}:${d.chapter}">${esc(getBook(d.book).name)} ${d.chapter}: ${d.exp ? `${d.got} statt ${d.exp} Verse` : `${d.got} Verse – Kapitel gibt es in der Vorlage nicht`}</button>`)
             .join('')}${r.deviations.length > 80 ? '<br>…' : ''}</div>`;
       } else if (r.books > 60) {
         html += `<p class="report-ok">✓ Alle Kapitel passen zur Vorlage.</p>`;
