@@ -59,7 +59,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 /* ================= Layout ================= */
 .app {
   display: grid;
-  grid-template-columns: minmax(280px, var(--split)) 10px minmax(300px, 1fr);
+  grid-template-columns: minmax(280px, var(--split)) 20px minmax(300px, 1fr);
   height: 100vh;
   height: 100dvh;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
@@ -68,17 +68,32 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .divider {
   position: relative;
+  z-index: 6; /* über den Seitenrändern, damit die verbreiterte Greiffläche wirkt */
   cursor: col-resize;
   touch-action: none;
   display: flex; align-items: center; justify-content: center;
   background: var(--bg);
 }
-.divider::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--line); }
-.divider span { position: relative; width: 4px; height: 44px; border-radius: 4px; background: var(--line-2); transition: background .15s; }
-.divider:hover span, .divider.dragging span { background: var(--accent); }
+.divider::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--line); transition: background .15s; }
+/* unsichtbar verbreiterte Greiffläche – leichter zu treffen, ohne optisch breiter zu sein */
+.divider::after { content: ''; position: absolute; top: 0; bottom: 0; left: -8px; right: -8px; }
+/* Griff in der Mitte mit drei Punkten */
+.divider span {
+  position: relative; z-index: 1; width: 14px; height: 64px; border-radius: 8px;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  transition: background .15s, border-color .15s, transform .15s;
+}
+.divider span i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); transition: background .15s; }
+.divider:hover span, .divider.dragging span { border-color: var(--accent); background: var(--bg-3); }
+.divider:hover span i, .divider.dragging span i { background: var(--accent); }
+.divider.dragging span { transform: scale(1.08); }
+.divider.dragging::before { background: var(--accent); }
+/* Während des Ziehens: nirgends Text markieren */
+body.resizing, body.resizing * { -webkit-user-select: none !important; user-select: none !important; cursor: col-resize !important; }
 
 /* Seiten tauschen */
-.app.swapped { grid-template-columns: minmax(300px, 1fr) 10px minmax(280px, var(--split)); }
+.app.swapped { grid-template-columns: minmax(300px, 1fr) 20px minmax(280px, var(--split)); }
 .app.swapped .bible-pane { grid-column: 1; grid-row: 1; }
 .app.swapped .divider { grid-column: 2; grid-row: 1; }
 .app.swapped .notes-pane { grid-column: 3; grid-row: 1; }

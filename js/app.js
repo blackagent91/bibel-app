@@ -24,7 +24,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '22 · 08.11.2026';
+export const APP_VERSION = '23 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -449,21 +449,30 @@ function bindLayout() {
     e.preventDefault();
     div.setPointerCapture(e.pointerId);
     div.classList.add('dragging');
+    document.body.classList.add('resizing'); // keine Textauswahl während des Ziehens
+    window.getSelection()?.removeAllRanges();
+    bible.clearSelection();
     const r = app.getBoundingClientRect();
+    const x0 = e.clientX;
+    const split0 = settings.split;
     const move = (ev) => {
-      let pct = Math.min(75, Math.max(25, ((ev.clientX - r.left) / r.width) * 100));
-      if (settings.swap === '1') pct = 100 - pct; // Notizen rechts: Breite von rechts gemessen
+      // relativ zur Startposition: die Spalte bewegt sich genau mit dem Finger, ohne Sprung
+      const dx = ((ev.clientX - x0) / r.width) * 100 * (settings.swap === '1' ? -1 : 1);
+      const pct = Math.min(75, Math.max(25, split0 + dx));
       settings.split = Math.round(pct * 10) / 10;
       app.style.setProperty('--split', `${settings.split}%`);
     };
     const up = () => {
       div.classList.remove('dragging');
+      document.body.classList.remove('resizing');
       div.removeEventListener('pointermove', move);
       div.removeEventListener('pointerup', up);
+      div.removeEventListener('pointercancel', up);
       saveSettings();
     };
     div.addEventListener('pointermove', move);
     div.addEventListener('pointerup', up);
+    div.addEventListener('pointercancel', up);
   });
   // Seiten tauschen: Griff antippen oder zur Seite ziehen
   const swap = $('#swap-btn');
