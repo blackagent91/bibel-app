@@ -139,7 +139,9 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   const books = [];
   const xrefs = {}; // "Buch:Kapitel:Vers" -> ["43.15.18-19", …] (Stellen unter den Zwischenüberschriften)
   let pendingRefs = [];
-  const notes = { unmatched: [], skipped: [], fallbacks: [] }; // für den Prüfbericht
+  const notes = { unmatched: [], skipped: [], fallbacks: [], starts: [] }; // für den Prüfbericht
+  const sizeChars = new Map(); // Schriftgröße -> Anzahl Zeichen (ganzes Dokument)
+  let sizeTotal = 0;
   let pageNo = 0;
   const st = {
     book: 0,
@@ -208,8 +210,10 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     else if (HYPHEN_END.test(b)) st.buf = b.replace(/[\u00AD\s]+$/, '').replace(/[\u2010\u2011]$/, '-') + t; // echter Bindestrich
     else st.buf = b.replace(/\s+$/, '') + ' ' + t;
   };
-  const startBook = (id) => {
+  const startBook = (id, how = '') => {
     flush();
+    books[id - 1] = undefined; // falls das Buch vorher fälschlich begonnen wurde: frisch anfangen
+    notes.starts.push(`${BOOKS[id - 1].name} – S. ${pageNo}${how ? ` (${how})` : ''}`);
     st.book = id;
     st.chapter = 1;
     st.verse = id === 19 ? 0 : 1;
@@ -274,7 +278,14 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     const textItems = items.filter((i) => i.s.trim());
     if (!textItems.length) return;
 
-    const body = weightedMode(textItems.map((i) => [Math.round(i.size * 2) / 2, i.s.length]));
+    // Normale Schriftgröße über das ganze Dokument bestimmen (eine Seite mit wenig Bibeltext und
+    // langer Fußnote würde sonst die Fußnotenschrift für den Fließtext halten)
+    const pageSizes = textItems.map((i) => [Math.round(i.size * 2) / 2, i.s.length]);
+    for (const [k, w] of pageSizes) {
+      sizeChars.set(k, (sizeChars.get(k) || 0) + w);
+      sizeTotal += w;
+    }
+    const body = sizeTotal > 4000 ? weightedMode([...sizeChars]) : weightedMode(pageSizes);
     const bodyFont = weightedMode(
       textItems.filter((i) => Math.abs(i.size - body) < 0.6).map((i) => [i.font, i.s.length])
     );
@@ -322,7 +333,18 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       titleId = matchBookTitle(joinText(titles));
       titleTop = Math.max(...titles.map((i) => i.y + i.size));
     }
-    if (titles.length && !(titleId && titleId > st.book) && titleId !== st.book) {
+    if (titleId && titleId !== st.book) {
+      if (titleId < st.book) {
+        notes.fallbacks.push(`Seite ${pageNo}: Titel „${BOOKS[titleId - 1].name}“ nach „${BOOKS[st.book - 1].name}“ gefunden – Zuordnung korrigiert`);
+      }
+      const above = (i) => i.y > titleTop;
+      processRegion(normal.filter(above), drops.filter(above), pageWidth, body, bodyFont);
+      startBook(titleId);
+      const below = (i) => i.y <= titleTop;
+      processRegion(normal.filter(below), drops.filter(below), pageWidth, body, bodyFont);
+      return;
+    }
+    if (titles.length && !titleId) {
       const t = joinText(titles);
       const above = (i) => i.y > titleTop;
       // Text oberhalb der Überschrift gehört noch zum laufenden Buch
@@ -398,7 +420,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     if (n === 1 && st.book < 66 && wellUnderway) {
       const next = st.book + 1;
       notes.fallbacks.push(`Seite ${pageNo}: Buchanfang ohne erkannten Titel → als „${BOOKS[next - 1].name}“ eingeordnet`);
-      startBook(next);
+      startBook(next, 'ohne Titel erkannt');
       if (next !== 19) startChapter(1, 1);
       return;
     }

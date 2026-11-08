@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '26 · 08.11.2026';
+export const APP_VERSION = '27 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -686,6 +686,9 @@ function bindSettings() {
         : `<p class="report-ok">✓ Alle Bücher und Kapitel wurden erkannt.</p>`;
       if (extra.length) html += `<p class="hint">Hinweise (für die Fehlersuche):</p><div class="report-list">${extra.map(esc).join('<br>')}</div>`;
       if (skipped.length) html += `<p class="hint">Übersprungen (Vorwort/Anhang, kein Bibeltext): ${skipped.length} Abschnitt${skipped.length > 1 ? 'e' : ''}</p>`;
+      if (r.starts?.length) {
+        html += `<details class="report-details"><summary>Gefundene Buchanfänge (${r.starts.length})</summary><div class="report-list">${r.starts.map(esc).join('<br>')}</div></details>`;
+      }
       html += `<p class="hint">Stichprobe: Schau dir ein paar Kapitel an. Wenn irgendwo Überschriften oder Fußnoten im Text stehen, sag Bescheid.</p>`;
     } else {
       html += `<p class="report-ok">✓ ${res.verses.toLocaleString('de-DE')} Verse importiert.</p>`;

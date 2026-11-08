@@ -697,3 +697,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 @media (max-width: 760px) {
   .focus-btn, .focus-switch { display: none !important; }
 }
+
+.report-details { margin: 0 0 14px; }
+.report-details summary { cursor: pointer; font-size: 13px; color: var(--text-2); padding: 6px 0; }
+.report-details .report-list { margin-top: 6px; }
