@@ -26,6 +26,9 @@ const MIN_VERTICAL_REVERSALS = 6; // ab 3 Bögen (Ab-Auf-Ab-Auf…) gilt Hoch-ru
 const MIN_HORIZONTAL_REVERSALS = 3;
 const FADE_MS = 380;
 const PALM_SIZE = 40;
+const PAGE_W = 640; // feste Seitenbreite der Notiz (logische Pixel), wird auf die Spaltenbreite skaliert
+const MIN_SCALE = 0.5;
+const MAX_SCALE = 1.35;
 const HOLD_MS = 550; // so lange den Stift ruhig halten, damit eine Form einrastet
 const AUTO_SHAPE_SIZE = 75; // ab dieser Größe (px Diagonale) werden Formen automatisch erkannt // Kontaktfläche (px), ab der eine Berührung als Handballen gilt
 
@@ -467,7 +470,7 @@ export class NotesEditor {
       target = findTarget(ev.clientY);
       const ref = target || ed.lastElementChild;
       const r = ref.getBoundingClientRect();
-      hint.style.top = `${(target ? r.top - 6 : r.bottom + 4) - pageTop()}px`;
+      hint.style.top = `${((target ? r.top - 6 : r.bottom + 4) - pageTop()) / (this.scale || 1)}px`;
       hint.classList.add('show');
       // am Rand automatisch scrollen
       const sr = this.el.scroll.getBoundingClientRect();
@@ -508,6 +511,22 @@ export class NotesEditor {
       text.normalize();
     });
     this.changed();
+  }
+
+  /**
+   * Notizseite auf die verfügbare Breite skalieren. Text, Bibelstellen, Raster und Handschrift
+   * werden gemeinsam größer/kleiner – beim Drehen des iPads oder Verschieben des Trenners bleibt
+   * alles an seinem Platz zueinander und nichts verschwindet.
+   */
+  applyScale() {
+    const avail = this.el.scroll.clientWidth;
+    if (!avail) return this.scale || 1;
+    const s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, avail / PAGE_W));
+    if (Math.abs(s - (this.scale || 0)) > 0.001) {
+      this.scale = s;
+      this.el.page.style.zoom = String(s);
+    }
+    return this.scale;
   }
 
   /** Bibelstellen-Block entfernen (Rückgängig holt ihn zurück) */
@@ -1042,7 +1061,7 @@ export class NotesEditor {
     } else {
       top = this.el.editor.getBoundingClientRect().top - pr.top;
     }
-    hint.style.top = `${top}px`;
+    hint.style.top = `${top / (this.scale || 1)}px`;
     hint.classList.add('show');
   }
   hideDropHint() {
@@ -1173,14 +1192,15 @@ class Ink {
   measure() {
     const br = this.ed.el.body.getBoundingClientRect();
     const pr = this.ed.el.page.getBoundingClientRect();
-    this.geo = { pageLeft: pr.left, pageTop: pr.top, ox: pr.left - br.left, oy: pr.top - br.top, h: br.height };
+    const scale = this.ed.scale || 1;
+    this.geo = { pageLeft: pr.left, pageTop: pr.top, ox: pr.left - br.left, oy: pr.top - br.top, h: br.height, scale };
     return this.geo;
   }
 
   // Koordinaten relativ zur Notiz-Seite (scrollen + Breitenänderung bleiben stimmig)
   toPage(e) {
     const g = this.geo || this.measure();
-    return [e.clientX - g.pageLeft, e.clientY - g.pageTop];
+    return [(e.clientX - g.pageLeft) / g.scale, (e.clientY - g.pageTop) / g.scale];
   }
 
   /** Stift ist gerade aktiv (oder war es eben noch) -> Handballen ignorieren */
@@ -1496,6 +1516,7 @@ class Ink {
   }
 
   resize() {
+    this.ed.applyScale(); // Seite an die neue Breite anpassen (z. B. iPad gedreht)
     const r = this.ed.el.body.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     for (const cv of [this.canvas, this.live, this.mcanvas]) {
@@ -1574,7 +1595,7 @@ class Ink {
   prepare(ctx) {
     const dpr = this.dpr || 1;
     const g = this.geo || this.measure();
-    ctx.setTransform(dpr, 0, 0, dpr, g.ox * dpr, g.oy * dpr);
+    ctx.setTransform(dpr * g.scale, 0, 0, dpr * g.scale, g.ox * dpr, g.oy * dpr);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     return g;
@@ -1598,8 +1619,8 @@ class Ink {
     }
     const g = this.prepare(ctx);
     this.prepare(mctx);
-    const minY = -g.oy - 50;
-    const maxY = -g.oy + g.h + 50;
+    const minY = (-g.oy - 50) / g.scale;
+    const maxY = (-g.oy + g.h + 50) / g.scale;
     for (const s of this.strokes) {
       let box = BOXES.get(s);
       if (!box) BOXES.set(s, (box = bbox(s.p)));
