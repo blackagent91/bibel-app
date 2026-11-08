@@ -1,0 +1,579 @@
+// Bibelstudium – Hauptlogik: Daten, Verzeichnis, Drag & Drop, Einstellungen
+import { db, uid } from './db.js';
+import { BOOKS, getBook, formatRef, compareRefs } from './books.js';
+import { loadImported, listTranslations, getTranslation, importBibleFile, deleteImported } from './translations.js';
+import { BibleView } from './bible.js';
+import { NotesEditor } from './notes.js';
+import { $, $$, esc, toast, formatDate } from './util.js';
+
+// ---------------------------------------------------------------------------
+// Zustand
+// ---------------------------------------------------------------------------
+const state = {
+  notes: new Map(), // id -> note
+  marks: [], // einfache Markierungen ohne Notiz: {id, book, chapter, vs, ve, color}
+  current: null, // aktuell geöffnete Notiz
+  drawerTab: 'notes',
+};
+
+const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50 };
+const settings = { ...DEFAULTS, ...readLS('settings', {}) };
+
+function readLS(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeLS(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+const saveSettings = () => writeLS('settings', settings);
+
+const isEmpty = (n) => !n.title && !n.text && !(n.strokes && n.strokes.length) && !(n.refs && n.refs.length);
+
+function newNote(title = '') {
+  const now = Date.now();
+  return { id: uid('n_'), title, html: '', text: '', refs: [], strokes: [], created: now, updated: now };
+}
+
+// ---------------------------------------------------------------------------
+// Markierungen für die Bibelansicht
+// ---------------------------------------------------------------------------
+function marksFor(book, chapter) {
+  const out = [];
+  for (const m of state.marks) if (m.book === book && m.chapter === chapter) out.push({ ...m });
+  for (const n of state.notes.values()) {
+    for (const r of n.refs || []) {
+      if (r.book === book && r.chapter === chapter) {
+        out.push({ vs: r.vs, ve: r.ve, color: r.color, noteId: n.id, noteTitle: n.title || 'Unbenannte Notiz' });
+      }
+    }
+  }
+  return out;
+}
+
+function chaptersWithNotes(book) {
+  const set = new Set();
+  for (const m of state.marks) if (m.book === book) set.add(m.chapter);
+  for (const n of state.notes.values()) for (const r of n.refs || []) if (r.book === book) set.add(r.chapter);
+  return set;
+}
+
+async function setHighlight(sel, color) {
+  // vorhandene Markierungen im Bereich aufteilen / entfernen
+  const next = [];
+  const removed = [];
+  for (const m of state.marks) {
+    if (m.book !== sel.book || m.chapter !== sel.chapter || m.ve < sel.vs || m.vs > sel.ve) {
+      next.push(m);
+      continue;
+    }
+    removed.push(m);
+    if (m.vs < sel.vs) next.push({ ...m, id: uid('m_'), ve: sel.vs - 1 });
+    if (m.ve > sel.ve) next.push({ ...m, id: uid('m_'), vs: sel.ve + 1 });
+  }
+  if (color !== 'none') next.push({ id: uid('m_'), book: sel.book, chapter: sel.chapter, vs: sel.vs, ve: sel.ve, color });
+  const keep = new Set(next.map((m) => m.id));
+  for (const m of removed) if (!keep.has(m.id)) await db.del('marks', m.id);
+  for (const m of next) if (!state.marks.includes(m)) await db.put('marks', m);
+  state.marks = next;
+  bible.applyMarks();
+  if (color === 'none') {
+    const linked = marksFor(sel.book, sel.chapter).some((m) => m.noteId && m.ve >= sel.vs && m.vs <= sel.ve);
+    toast(linked ? 'Markierung entfernt. Stellen mit Notiz bleiben markiert, solange der Block in der Notiz ist.' : 'Markierung entfernt');
+  }
+  renderDrawer();
+}
+
+// ---------------------------------------------------------------------------
+// Notizen
+// ---------------------------------------------------------------------------
+async function persistNote(n) {
+  if (isEmpty(n)) {
+    if (state.notes.has(n.id)) {
+      state.notes.delete(n.id);
+      await db.del('notes', n.id);
+    }
+  } else {
+    state.notes.set(n.id, n);
+    await db.put('notes', n);
+  }
+  writeLS('lastNote', n.id);
+  bible.applyMarks();
+  renderDrawer();
+}
+
+function openNote(id, { jump = true } = {}) {
+  const n = state.notes.get(id);
+  if (!n) return;
+  state.current = n;
+  editor.load(n);
+  writeLS('lastNote', id);
+  closeDrawer();
+  showPane('notes');
+  if (jump && n.refs?.length) bible.goto(n.refs[0]);
+  renderDrawer();
+}
+
+function createNote(title = '') {
+  editor.save.flush();
+  const n = newNote(title);
+  state.current = n;
+  editor.load(n);
+  renderDrawer();
+  return n;
+}
+
+async function deleteNote(id) {
+  const n = state.notes.get(id);
+  if (!n) return;
+  if (!confirm(`Notiz „${n.title || 'Unbenannt'}“ wirklich löschen?`)) return;
+  state.notes.delete(id);
+  await db.del('notes', id);
+  if (state.current?.id === id) {
+    const latest = sortedNotes()[0];
+    if (latest) {
+      state.current = latest;
+      editor.load(latest);
+    } else createNote();
+  }
+  bible.applyMarks();
+  renderDrawer();
+  toast('Notiz gelöscht');
+}
+
+const sortedNotes = () => [...state.notes.values()].sort((a, b) => b.updated - a.updated);
+
+// ---------------------------------------------------------------------------
+// Aktionen aus der Bibel
+// ---------------------------------------------------------------------------
+function handleBibleAction(sel, act, extra) {
+  if (act === 'highlight') {
+    bible.clearSelection();
+    return setHighlight(sel, extra);
+  }
+  if (act === 'new') {
+    const n = createNote(formatRef(sel));
+    editor.insertScripture(sel, { color: 'yellow' });
+    bible.clearSelection();
+    showPane('notes');
+    setTimeout(() => editor.el.editor.focus(), 50);
+    toast(`Notiz „${n.title}“ erstellt`);
+    return;
+  }
+  if (act === 'add') {
+    editor.insertScripture(sel, { color: 'yellow' });
+    bible.clearSelection();
+    toast(`${formatRef(sel)} → „${state.current.title || 'Notiz'}“`);
+    return;
+  }
+  if (act === 'drag') startDrag(sel, extra);
+}
+
+/** Eigene Drag-&-Drop-Logik (funktioniert mit Maus, Finger und Apple Pencil) */
+function startDrag(sel, downEvent) {
+  const ghost = $('#drag-ghost');
+  ghost.innerHTML = `<b>${esc(formatRef(sel))}</b><span>${esc(sel.verses.map((v) => v.t).join(' '))}</span>`;
+  ghost.classList.remove('hidden');
+  document.body.classList.add('dragging-ref');
+  const move = (x, y) => {
+    ghost.style.left = `${x}px`;
+    ghost.style.top = `${y}px`;
+    if (editor.isOverEditor(x, y)) editor.showDropHint(x, y);
+    else editor.hideDropHint();
+  };
+  move(downEvent.clientX, downEvent.clientY);
+  const onMove = (e) => {
+    e.preventDefault();
+    move(e.clientX, e.clientY);
+  };
+  const onUp = (e) => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    ghost.classList.add('hidden');
+    document.body.classList.remove('dragging-ref');
+    editor.hideDropHint();
+    if (e.type === 'pointerup' && editor.isOverEditor(e.clientX, e.clientY)) dropScripture(sel, e.clientX, e.clientY);
+  };
+  window.addEventListener('pointermove', onMove, { passive: false });
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+}
+
+function dropScripture(sel, x, y) {
+  if (editor.mode !== 'text') editor.setMode('text');
+  editor.insertScripture(sel, { x, y, color: 'yellow' });
+  bible.clearSelection();
+  toast(`${formatRef(sel)} in Notiz abgelegt`);
+}
+
+// ---------------------------------------------------------------------------
+// Notizverzeichnis
+// ---------------------------------------------------------------------------
+const drawer = $('#drawer');
+function openDrawer() {
+  editor.save.flush();
+  drawer.classList.add('open');
+  drawer.setAttribute('aria-hidden', 'false');
+  renderDrawer();
+}
+function closeDrawer() {
+  drawer.classList.remove('open');
+  drawer.setAttribute('aria-hidden', 'true');
+}
+
+function renderDrawer() {
+  if (!drawer.classList.contains('open')) return;
+  const q = $('#drawer-search').value.trim().toLowerCase();
+  const list = $('#drawer-list');
+  if (state.drawerTab === 'notes') {
+    const notes = sortedNotes().filter((n) => {
+      if (!q) return true;
+      const hay = `${n.title} ${n.text} ${(n.refs || []).map((r) => formatRef(r) + ' ' + formatRef(r, true)).join(' ')}`.toLowerCase();
+      return hay.includes(q);
+    });
+    if (!notes.length) {
+      list.innerHTML = `<div class="empty">${q ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere rechts eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
+      return;
+    }
+    list.innerHTML = notes
+      .map((n) => {
+        const refs = (n.refs || [])
+          .map((r, i) => `<button class="chip" data-note="${n.id}" data-ref-idx="${i}"><i style="background:var(--c-${r.color || 'yellow'})"></i>${esc(formatRef(r, true))}</button>`)
+          .join('');
+        return `<div class="note-item${state.current?.id === n.id ? ' active' : ''}" data-open="${n.id}">
+          <h4>${esc(n.title || 'Unbenannte Notiz')}</h4>
+          ${refs ? `<div class="chips">${refs}</div>` : ''}
+          ${n.text ? `<p>${esc(n.text.slice(0, 160))}</p>` : ''}
+          <time>${formatDate(n.updated)}</time>
+          <button class="icon-btn del" data-del="${n.id}" title="Löschen" aria-label="Löschen"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button>
+        </div>`;
+      })
+      .join('');
+  } else {
+    // Alle markierten Stellen in Bibelreihenfolge
+    const items = [];
+    for (const n of state.notes.values()) for (const r of n.refs || []) items.push({ ...r, noteId: n.id, label: n.title || 'Unbenannte Notiz' });
+    for (const m of state.marks) items.push({ ...m, label: 'Nur markiert' });
+    const filtered = items
+      .filter((r) => !q || `${formatRef(r)} ${formatRef(r, true)} ${r.label}`.toLowerCase().includes(q))
+      .sort(compareRefs);
+    if (!filtered.length) {
+      list.innerHTML = `<div class="empty">${q ? 'Nichts gefunden.' : 'Noch keine markierten Bibelstellen.'}</div>`;
+      return;
+    }
+    let html = '';
+    let lastBook = 0;
+    for (const r of filtered) {
+      if (r.book !== lastBook) {
+        if (lastBook) html += '</div>';
+        html += `<div class="ref-group"><h5>${esc(getBook(r.book).name)}</h5>`;
+        lastBook = r.book;
+      }
+      html += `<div class="ref-item" data-goto="${r.book}:${r.chapter}:${r.vs}:${r.ve}" ${r.noteId ? `data-note="${r.noteId}"` : ''}>
+        <i style="background:var(--c-${r.color || 'yellow'})"></i>
+        <div><b>${esc(formatRef(r))}</b><span>${esc(r.label)}</span></div></div>`;
+    }
+    list.innerHTML = html + '</div>';
+  }
+}
+
+function bindDrawer() {
+  $('#btn-index').onclick = openDrawer;
+  $('#drawer-close').onclick = closeDrawer;
+  $('#drawer-scrim').onclick = closeDrawer;
+  $('#drawer-new').onclick = () => {
+    createNote();
+    closeDrawer();
+    setTimeout(() => editor.el.title.focus(), 50);
+  };
+  $('#drawer-search').addEventListener('input', renderDrawer);
+  $$('#drawer .tab').forEach(
+    (t) =>
+      (t.onclick = () => {
+        state.drawerTab = t.dataset.tab;
+        $$('#drawer .tab').forEach((x) => x.classList.toggle('active', x === t));
+        $('#drawer-search').placeholder = t.dataset.tab === 'notes' ? 'Notizen durchsuchen …' : 'Bibelstellen durchsuchen …';
+        renderDrawer();
+      })
+  );
+  $('#drawer-list').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-del]');
+    if (del) {
+      e.stopPropagation();
+      return deleteNote(del.dataset.del);
+    }
+    const chip = e.target.closest('[data-ref-idx]');
+    if (chip) {
+      e.stopPropagation();
+      const n = state.notes.get(chip.dataset.note);
+      openNote(n.id, { jump: false });
+      bible.goto(n.refs[+chip.dataset.refIdx]);
+      showPane(isNarrow() ? 'bible' : 'notes');
+      return;
+    }
+    const go = e.target.closest('[data-goto]');
+    if (go) {
+      const [book, chapter, vs, ve] = go.dataset.goto.split(':').map(Number);
+      if (go.dataset.note) openNote(go.dataset.note, { jump: false });
+      else closeDrawer();
+      bible.goto({ book, chapter, vs, ve });
+      if (isNarrow()) showPane('bible');
+      return;
+    }
+    const item = e.target.closest('[data-open]');
+    if (item) openNote(item.dataset.open);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Layout: Trenner, Mobil-Tabs
+// ---------------------------------------------------------------------------
+const app = $('#app');
+const isNarrow = () => window.matchMedia('(max-width: 760px)').matches;
+
+function showPane(which) {
+  app.dataset.show = which;
+  $$('#mobile-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.show === which));
+}
+
+function bindLayout() {
+  app.style.setProperty('--split', `${settings.split}%`);
+  const div = $('#divider');
+  div.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    div.setPointerCapture(e.pointerId);
+    div.classList.add('dragging');
+    const r = app.getBoundingClientRect();
+    const move = (ev) => {
+      const pct = Math.min(75, Math.max(25, ((ev.clientX - r.left) / r.width) * 100));
+      settings.split = Math.round(pct * 10) / 10;
+      app.style.setProperty('--split', `${settings.split}%`);
+    };
+    const up = () => {
+      div.classList.remove('dragging');
+      div.removeEventListener('pointermove', move);
+      div.removeEventListener('pointerup', up);
+      saveSettings();
+    };
+    div.addEventListener('pointermove', move);
+    div.addEventListener('pointerup', up);
+  });
+  div.addEventListener('dblclick', () => {
+    settings.split = 50;
+    app.style.setProperty('--split', '50%');
+    saveSettings();
+  });
+  $('#mobile-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-show]');
+    if (b) showPane(b.dataset.show);
+  });
+  showPane('notes');
+
+  $$('.mode-btn').forEach((b) => (b.onclick = () => editor.setMode(b.dataset.mode)));
+  $('#btn-new-note').onclick = () => {
+    createNote();
+    setTimeout(() => editor.el.title.focus(), 50);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Einstellungen
+// ---------------------------------------------------------------------------
+function applySettings() {
+  document.documentElement.style.setProperty('--bible-size', `${settings.bibleSize}px`);
+  document.documentElement.style.setProperty('--note-size', `${settings.noteSize}px`);
+  bible.setLayout(settings.layout, settings.font);
+  $('#out-bible-size').textContent = settings.bibleSize;
+  $('#out-note-size').textContent = settings.noteSize;
+}
+
+function renderTranslations() {
+  const list = listTranslations();
+  if (!list.some((t) => t.id === settings.trans)) settings.trans = 'elb1905';
+  $('#translation').innerHTML = list
+    .map((t) => `<option value="${t.id}"${t.id === settings.trans ? ' selected' : ''}>${esc(t.short)}</option>`)
+    .join('');
+  $('#trans-list').innerHTML = list
+    .map(
+      (t) => `<div class="trans-item"><div>${esc(t.name)}<small>${esc(t.note || '')}</small></div>
+      ${t.builtin ? '' : `<button class="btn danger" data-del-trans="${t.id}">Entfernen</button>`}</div>`
+    )
+    .join('');
+}
+
+function bindSettings() {
+  const modal = $('#settings');
+  $('#btn-settings').onclick = () => {
+    $('#set-bible-size').value = settings.bibleSize;
+    $('#set-note-size').value = settings.noteSize;
+    $('#set-layout').value = settings.layout;
+    $('#set-font').value = settings.font;
+    renderTranslations();
+    modal.classList.remove('hidden');
+  };
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal || e.target.closest('[data-close]')) modal.classList.add('hidden');
+  });
+  const bindInput = (id, key, num = true) =>
+    $(id).addEventListener('input', (e) => {
+      settings[key] = num ? +e.target.value : e.target.value;
+      applySettings();
+      saveSettings();
+    });
+  bindInput('#set-bible-size', 'bibleSize');
+  bindInput('#set-note-size', 'noteSize');
+  bindInput('#set-layout', 'layout', false);
+  bindInput('#set-font', 'font', false);
+
+  $('#translation').addEventListener('change', async (e) => {
+    settings.trans = e.target.value;
+    saveSettings();
+    await bible.setTranslation(settings.trans);
+    toast(`Übersetzung: ${getTranslation(settings.trans).name}`);
+  });
+
+  $('#import-bible').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    toast('Importiere … das kann einen Moment dauern', 8000);
+    try {
+      const res = await importBibleFile(file);
+      settings.trans = res.id;
+      saveSettings();
+      renderTranslations();
+      await bible.setTranslation(res.id);
+      toast(`„${res.name}“ importiert (${res.verses.toLocaleString('de-DE')} Verse)`, 4000);
+    } catch (err) {
+      console.error(err);
+      toast(`Import fehlgeschlagen: ${err.message}`, 6000);
+    }
+  });
+
+  $('#trans-list').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-del-trans]');
+    if (!b) return;
+    if (!confirm('Diese importierte Übersetzung vom Gerät entfernen? Deine Notizen bleiben erhalten.')) return;
+    await deleteImported(b.dataset.delTrans);
+    if (settings.trans === b.dataset.delTrans) {
+      settings.trans = 'elb1905';
+      saveSettings();
+      await bible.setTranslation('elb1905');
+    }
+    renderTranslations();
+  });
+
+  // Sicherung
+  $('#export-backup').onclick = async () => {
+    editor.save.flush();
+    const data = {
+      app: 'bibelstudium',
+      version: 1,
+      exported: new Date().toISOString(),
+      notes: [...state.notes.values()],
+      marks: state.marks,
+      settings,
+    };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `bibelstudium-sicherung-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  $('#import-backup').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (data.app !== 'bibelstudium') throw new Error('Keine Bibelstudium-Sicherung');
+      if (!confirm(`${data.notes.length} Notizen und ${data.marks.length} Markierungen einspielen? Vorhandene Einträge mit gleicher ID werden überschrieben.`)) return;
+      for (const n of data.notes) {
+        state.notes.set(n.id, n);
+        await db.put('notes', n);
+      }
+      for (const m of data.marks) {
+        state.marks = state.marks.filter((x) => x.id !== m.id).concat(m);
+        await db.put('marks', m);
+      }
+      bible.applyMarks();
+      renderDrawer();
+      toast('Sicherung eingespielt');
+    } catch (err) {
+      toast(`Fehler: ${err.message}`, 5000);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+const editor = new NotesEditor({
+  onSave: persistNote,
+  onJump: (ref) => {
+    bible.goto(ref);
+    if (isNarrow()) showPane('bible');
+  },
+  onDropScripture: (payload, x, y) => dropScripture(payload, x, y),
+});
+
+const bible = new BibleView({
+  marksFor,
+  chaptersWithNotes,
+  onAction: handleBibleAction,
+  onOpenNote: (id, opts) => openNote(id, opts),
+  onNavigate: (pos) => writeLS('position', pos),
+  toast,
+});
+
+async function init() {
+  bindLayout();
+  bindDrawer();
+  bindSettings();
+  applySettings();
+
+  try {
+    const [notes, marks] = await Promise.all([db.all('notes'), db.all('marks'), loadImported()]);
+    for (const n of notes) state.notes.set(n.id, n);
+    state.marks = marks;
+  } catch (e) {
+    console.error(e);
+    toast('Speicher nicht verfügbar – Notizen werden nicht dauerhaft gespeichert.', 6000);
+  }
+  renderTranslations();
+  bible.trans = settings.trans;
+
+  const last = state.notes.get(readLS('lastNote', null)) || sortedNotes()[0];
+  if (last) {
+    state.current = last;
+    editor.load(last);
+  } else createNote();
+
+  const pos = readLS('position', { book: 1, chapter: 1 });
+  await bible.goto(getBook(pos.book) ? pos : { book: 1, chapter: 1 }, { flash: false });
+
+  window.addEventListener('beforeunload', () => editor.save.flush());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') editor.save.flush();
+  });
+
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+}
+
+init();
+
+// Für Fehlersuche in der Konsole
+window.bibelstudium = { state, settings, bible, editor, BOOKS };
