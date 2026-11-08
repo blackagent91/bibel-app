@@ -34,7 +34,8 @@ export function scriptureHTML(p, color = 'yellow') {
   return (
     `<div class="scripture" contenteditable="false" data-color="${color}" data-added="${Date.now()}" data-ref='${JSON.stringify(ref)}'>` +
     `<button class="scripture-ref" type="button">${esc(formatRef(ref))}<span class="scripture-trans">${esc(p.transShort || '')}</span></button>` +
-    `<div class="scripture-text">${verses}</div></div>`
+    `<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>` +
+    `<div class="scripture-text" contenteditable="true" spellcheck="false">${verses}</div></div>`
   );
 }
 
@@ -145,6 +146,7 @@ export class NotesEditor {
     this.el.title.value = note?.title || '';
     this.applyPaper(note?.paper || readPaper());
     this.el.editor.innerHTML = note?.html || '';
+    upgradeScriptureBlocks(this.el.editor);
     this.hist = [this.el.editor.innerHTML];
     this.hIdx = 0;
     this.ink.setStrokes(note ? unpackStrokes(note) : []);
@@ -323,6 +325,14 @@ export class NotesEditor {
     return block;
   }
 
+  toggleScripture(block) {
+    if (!block) return;
+    if (block.hasAttribute('data-open')) block.removeAttribute('data-open');
+    else block.setAttribute('data-open', '');
+    this.changed();
+    if (this.handleBlock === block) this.positionHandle();
+  }
+
   topBlock(node) {
     const ed = this.el.editor;
     let n = node?.nodeType === 3 ? node.parentNode : node;
@@ -369,8 +379,15 @@ export class NotesEditor {
       if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
         e.preventDefault();
         e.inputType === 'historyUndo' ? this.undo() : this.redo();
+        return;
       }
+      // Im Bibeltext eines Blocks: nur Markieren/Formatieren erlaubt, kein Tippen oder Löschen
+      const t = e.target instanceof Element ? e.target : e.target?.parentElement;
+      if (t?.closest?.('.scripture-text') && !e.inputType.startsWith('format')) e.preventDefault();
     });
+    ed.addEventListener('drop', (e) => {
+      if (e.target.closest?.('.scripture-text')) e.preventDefault();
+    }, true);
     this.el.title.addEventListener('input', () => this.changed());
     this.el.title.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -398,6 +415,13 @@ export class NotesEditor {
     });
 
     ed.addEventListener('click', (e) => {
+      const block = e.target.closest('.scripture');
+      const toggle = e.target.closest('.scripture-toggle');
+      if (toggle || (block && !block.hasAttribute('data-open') && !e.target.closest('.scripture-ref'))) {
+        e.preventDefault();
+        this.toggleScripture(block);
+        return;
+      }
       const refBtn = e.target.closest('.scripture-ref');
       if (refBtn) {
         e.preventDefault();
@@ -1294,6 +1318,20 @@ function bbox(p) {
     if (p[i + 1] > d) d = p[i + 1];
   }
   return [a, b, c, d];
+}
+
+/** Ältere Bibelstellen-Blöcke um Aufklapp-Pfeil und Markierbarkeit ergänzen */
+function upgradeScriptureBlocks(root) {
+  for (const b of root.querySelectorAll('.scripture')) {
+    if (!b.querySelector('.scripture-toggle')) {
+      b.querySelector('.scripture-ref')?.insertAdjacentHTML('afterend', '<button class="scripture-toggle" type="button" contenteditable="false" aria-label="Text auf- oder zuklappen"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>');
+    }
+    const t = b.querySelector('.scripture-text');
+    if (t && t.getAttribute('contenteditable') !== 'true') {
+      t.setAttribute('contenteditable', 'true');
+      t.setAttribute('spellcheck', 'false');
+    }
+  }
 }
 
 /** Zuletzt gewähltes Papier (für neue Notizen) */

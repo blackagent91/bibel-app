@@ -655,3 +655,25 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
   .notes-pane .paper-switch button { width: 23px; }
   .notes-pane .head-row .icon-btn { width: 31px; }
 }
+
+/* Bibelstellen-Block: eingeklappt kompakt, aufgeklappt voller Text (markierbar) */
+.scripture { padding: 9px 44px 10px 18px; transition: padding .15s; }
+.scripture[data-open] { padding: 12px 44px 14px 18px; }
+.scripture-toggle {
+  position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; border-radius: 8px;
+  border: 0; background: transparent; color: var(--text-3);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.scripture-toggle svg { width: 18px; height: 18px; transition: transform .2s; }
+.scripture-toggle:hover { background: var(--bg-3); color: var(--text); }
+.scripture[data-open] .scripture-toggle svg { transform: rotate(180deg); }
+.scripture:not([data-open]) { cursor: pointer; }
+.scripture:not([data-open]) .scripture-text {
+  margin-top: 2px; font-size: .9em; color: var(--text-3);
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+  pointer-events: none;
+}
+.scripture[data-open] .scripture-text {
+  -webkit-user-select: text; user-select: text; outline: none; caret-color: transparent; cursor: text;
+}
+.scripture-text span[style*="background"] { border-radius: 3px; padding: 0 1px; }
