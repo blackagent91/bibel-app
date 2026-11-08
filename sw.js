@@ -1,5 +1,5 @@
 // Offline-Unterstützung: App-Dateien und Bibeltexte werden zwischengespeichert.
-const VERSION = 'bibelstudium-v7';
+const VERSION = 'bibelstudium-v8';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg',
   'js/app.js', 'js/bible.js', 'js/books.js', 'js/db.js', 'js/notes.js', 'js/translations.js', 'js/util.js', 'js/pdfimport.js',

@@ -81,15 +81,29 @@ const TITLE_PATTERNS = [
   [/judas/, 65],
 ];
 
+const LIGATURES = { '\uFB00': 'ff', '\uFB01': 'fi', '\uFB02': 'fl', '\uFB03': 'ffi', '\uFB04': 'ffl', '\uFB05': 'st', '\uFB06': 'st' };
+export const fixLigatures = (t) => t.replace(/[\uFB00-\uFB06]/g, (c) => LIGATURES[c]);
+
 export function matchBookTitle(title) {
-  const s = ' ' + title.toLowerCase().replace(/\s+/g, ' ') + ' ';
+  const s =
+    ' ' +
+    fixLigatures(title)
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      // beim Auslesen auseinandergerissene Ligaturen wieder zusammenfügen („o ff enbarung“)
+      .replace(/([a-zäöüß]) ?(ffi|ffl|ff|fi|fl) ?([a-zäöüß])/g, '$1$2$3') +
+    ' ';
+  return matchIn(s, s);
+}
+
+function matchIn(s, hay) {
   let ord = 1;
   if (/\b(zweite|2\.)/.test(s)) ord = 2;
   else if (/\b(dritte|3\.)/.test(s)) ord = 3;
   else if (/\b(vierte|4\.)/.test(s)) ord = 4;
   else if (/\b(f(ü|ue)nfte|5\.)/.test(s)) ord = 5;
   for (const [rx, id] of TITLE_PATTERNS) {
-    if (rx.test(s)) return Array.isArray(id) ? id[Math.min(ord, id.length) - 1] : id;
+    if (rx.test(hay)) return Array.isArray(id) ? id[Math.min(ord, id.length) - 1] : id;
   }
   return 0;
 }
@@ -123,7 +137,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   try { meta = (await pdf.getMetadata())?.info || {}; } catch {}
 
   const books = [];
-  const notes = { unmatched: [], fallbacks: [] }; // für den Prüfbericht
+  const notes = { unmatched: [], skipped: [], fallbacks: [] }; // für den Prüfbericht
   let pageNo = 0;
   const st = {
     book: 0,
@@ -164,6 +178,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     st.provisional = true;
     st.buf = '';
     st.inHeading = false;
+    st.suspended = false;
   };
   const startChapter = (n, firstVerse = 1) => {
     if (st.provisional) st.buf = ''; // Text vor dem ersten Kapitelanfang verwerfen
@@ -173,6 +188,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     st.buf = '';
     st.provisional = false;
     st.inHeading = false;
+    st.suspended = false;
   };
 
   for (let pn = 1; pn <= pdf.numPages; pn++) {
@@ -211,7 +227,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       if (!it.str) continue;
       const t = it.transform;
       const size = Math.hypot(t[2], t[3]) || Math.abs(t[3]) || 10;
-      items.push({ s: it.str, x: t[4], y: t[5], w: it.width, size, font: it.fontName });
+      items.push({ s: fixLigatures(it.str), x: t[4], y: t[5], w: it.width, size, font: it.fontName });
     }
     const textItems = items.filter((i) => i.s.trim());
     if (!textItems.length) return;
@@ -252,13 +268,23 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     let titleId = 0;
     let titleTop = -Infinity;
     if (titles.length) {
-      const t = titles.sort((a, b) => b.y - a.y || a.x - b.x).map((i) => i.s).join(' ');
-      titleId = matchBookTitle(t);
+      titleId = matchBookTitle(joinText(titles));
       titleTop = Math.max(...titles.map((i) => i.y + i.size));
     }
-    if (titles.length && !(titleId && titleId > st.book) && notes.unmatched.length < 20) {
-      const t = titles.map((i) => i.s).join(' ').replace(/\s+/g, ' ').trim();
-      if (t && titleId !== st.book) notes.unmatched.push(`Seite ${pageNo}: „${t.slice(0, 80)}“`);
+    if (titles.length && !(titleId && titleId > st.book) && titleId !== st.book) {
+      const t = joinText(titles);
+      const above = (i) => i.y > titleTop;
+      // Text oberhalb der Überschrift gehört noch zum laufenden Buch
+      processRegion(normal.filter(above), drops.filter(above), pageWidth, body, bodyFont);
+      const label = st.book === 66 || !st.book ? 'skipped' : 'unmatched';
+      if (t && notes[label].length < 25) notes[label].push(`Seite ${pageNo}: „${t.slice(0, 80)}“`);
+      // Anhang/Vorwort o. Ä.: ab hier nichts mehr an Verse anhängen, bis ein Buch/Kapitel beginnt
+      flush();
+      st.suspended = true;
+      st.buf = '';
+      const below = (i) => i.y <= titleTop;
+      processRegion(normal.filter(below), drops.filter(below), pageWidth, body, bodyFont);
+      return;
     }
     if (titleId && titleId > st.book) {
       const above = (i) => i.y > titleTop;
@@ -310,9 +336,12 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
 
   function handleDrop(n) {
     if (!st.book) return;
-    if (n === 1 && st.provisional) return startChapter(1, 1);
+    if (st.provisional && st.book !== 19 && n <= 3) return startChapter(n, 1);
     // Absicherung: neues „Kapitel 1“ ohne erkannten Buchtitel -> nächstes Buch der Bibel
-    if (n === 1 && st.book < 66 && (st.chapter > 1 || st.verse > 1)) {
+    if (st.suspended && st.book === 66) return; // Anhang nach der Offenbarung
+    const wellUnderway = st.chapter > 1 || st.verse >= 6;
+    if (n === 1 && st.chapter === 1 && !wellUnderway) return startChapter(1, 1); // Kapitel 1 erst jetzt richtig begonnen
+    if (n === 1 && st.book < 66 && wellUnderway) {
       const next = st.book + 1;
       notes.fallbacks.push(`Seite ${pageNo}: Buchanfang ohne erkannten Titel → als „${BOOKS[next - 1].name}“ eingeordnet`);
       startBook(next);
@@ -324,6 +353,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   }
 
   function handleLine(line, gapBefore, spacing, body, bodyFont) {
+    if (st.suspended) return;
     const items = line.items.sort((a, b) => a.x - b.x);
     const normalItems = items.filter((i) => i.size >= body * 0.88 && i.s.trim());
     const baseline = normalItems.length ? Math.min(...normalItems.map((i) => i.y)) : line.y;
@@ -372,7 +402,8 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       st.inHeading = true;
       return;
     }
-    if (st.inHeading && REF_LIST.test(text)) {
+    if (REF_LIST.test(text)) {
+      // Parallelstellen („2Kor 1,1-2; Kol 1,3“) – nie Verstext, und ihre Zahlen sind keine Versnummern
       st.inHeading = false;
       return;
     }
@@ -418,6 +449,23 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       st.buf += s;
     }
   }
+}
+
+/** Textstücke zu einer Zeichenkette verbinden – Leerzeichen nur bei echtem Abstand */
+function joinText(items) {
+  const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
+  let out = '';
+  let prev = null;
+  for (const i of sorted) {
+    if (prev) {
+      const sameLine = Math.abs(prev.y - i.y) < i.size * 0.5;
+      const gap = i.x - (prev.x + prev.w);
+      if (!sameLine || gap > i.size * 0.15) out += ' ';
+    }
+    out += i.s;
+    prev = i;
+  }
+  return out.replace(/\s+/g, ' ').trim();
 }
 
 function guessName(meta, fileName) {
