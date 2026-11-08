@@ -24,7 +24,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '17 · 08.11.2026';
+export const APP_VERSION = '18 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -677,6 +677,12 @@ function bindSettings() {
   });
 
   // Sicherung
+  $('#repair-app').onclick = () => {
+    editor.save.flush();
+    toast('Wird neu geladen …');
+    setTimeout(() => window.__repairApp?.(), 300);
+  };
+
   $('#export-backup').onclick = async () => {
     editor.save.flush();
     const data = {
@@ -783,10 +789,26 @@ async function init() {
     if (document.visibilityState === 'hidden') editor.save.flush();
   });
 
+  window.__appReady = true; // Start geglückt – Notfall-Hinweis wird nicht gebraucht
+
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    // Wenn eine neue Version komplett installiert ist, einmal neu laden – so laufen nie zwei Versionen gemischt
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      editor.save.flush();
+      location.reload();
+    });
     navigator.serviceWorker
       .register('sw.js', { updateViaCache: 'none' })
-      .then((reg) => reg.update())
+      .then((reg) => {
+        reg.update();
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+      })
       .catch(() => {});
   }
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});

@@ -1,18 +1,48 @@
-// Offline-Unterstützung: App-Dateien und Bibeltexte werden zwischengespeichert.
-const VERSION = 'bibelstudium-v17';
+// Offline-Unterstützung mit „ganzen“ Updates:
+// Eine neue Version wird beim Installieren komplett heruntergeladen (am Browser-Cache vorbei)
+// und erst dann aktiviert. So können nie Dateien aus verschiedenen Versionen gemischt werden.
+const VERSION = 'bibelstudium-v18';
+const DATA_CACHE = 'bibelstudium-daten'; // Bibeltexte, Querverweise, PDF-Leser – ändern sich nie
 const SHELL = [
-  './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg',
-  'js/app.js', 'js/bible.js', 'js/books.js', 'js/db.js', 'js/notes.js', 'js/translations.js', 'js/util.js', 'js/pdfimport.js',
+  './',
+  'index.html',
+  'css/app.css',
+  'manifest.webmanifest',
+  'icons/icon.svg',
+  'icons/icon-180.png',
+  'js/app.js',
+  'js/bible.js',
+  'js/books.js',
+  'js/db.js',
+  'js/notes.js',
+  'js/translations.js',
+  'js/util.js',
+  'js/pdfimport.js',
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches
+      .open(VERSION)
+      .then((c) =>
+        Promise.all(
+          SHELL.map((url) =>
+            fetch(url, { cache: 'reload' }).then((res) => {
+              if (!res.ok) throw new Error(`${url}: ${res.status}`);
+              return c.put(url, res);
+            })
+          )
+        )
+      )
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== DATA_CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -20,10 +50,11 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  // Bibeltexte: Cache zuerst (ändern sich nie)
-  if (url.pathname.includes('/data/')) {
+
+  // Bibeltexte, Querverweise, PDF-Leser: aus dem Datenspeicher (bleibt über Updates erhalten)
+  if (url.pathname.includes('/data/') || url.pathname.includes('/vendor/')) {
     e.respondWith(
-      caches.open(VERSION).then(async (c) => {
+      caches.open(DATA_CACHE).then(async (c) => {
         const hit = await c.match(e.request);
         if (hit) return hit;
         const res = await fetch(e.request);
@@ -33,14 +64,18 @@ self.addEventListener('fetch', (e) => {
     );
     return;
   }
-  // App-Dateien: Netzwerk zuerst, offline aus dem Cache
-  // immer beim Server nachfragen (sonst liefert der Browser-Cache bis zu 10 Minuten alte Dateien)
+
+  // App-Dateien: immer aus der vollständig installierten Version
   e.respondWith(
-    fetch(e.request.mode === 'navigate' ? e.request : new Request(e.request, { cache: 'no-cache' }))
-      .then((res) => {
-        if (res.ok) caches.open(VERSION).then((c) => c.put(e.request, res.clone()));
-        return res;
-      })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match('index.html')))
+    caches.open(VERSION).then(async (c) => {
+      const key = e.request.mode === 'navigate' ? 'index.html' : e.request;
+      const hit = await c.match(key, { ignoreSearch: true });
+      if (hit) return hit;
+      try {
+        return await fetch(e.request);
+      } catch {
+        return (await c.match('index.html')) || Response.error();
+      }
+    })
   );
 });
