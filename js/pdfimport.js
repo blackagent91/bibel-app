@@ -168,7 +168,36 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     flush();
     st.verse = v;
     st.buf = '';
+    st.bounds = [];
     attachRefs();
+  };
+  /**
+   * Zweite Kapitelerkennung: Die Versnummer springt zurück auf 2 (Vers 1 steht unnummeriert
+   * neben der großen Kapitelzahl) bzw. auf 1. Dann beginnt hier ein neues Kapitel – auch wenn
+   * die große Kapitelzahl im PDF nicht als Text lesbar war.
+   */
+  const chapterReset = (n) => {
+    let oldPart = st.buf;
+    let v1 = '';
+    if (n === 2) {
+      // zuverlässigste Art von Hinweis wählen; davon die erste Stelle (bei „Satzende“ die letzte)
+      const best = Math.max(-1, ...st.bounds.map((b) => b.tier));
+      const cands = st.bounds.filter((b) => b.tier === best);
+      const cut = !cands.length ? -1 : best > 0 ? cands[0].pos : cands[cands.length - 1].pos;
+      if (cut >= 0) {
+        oldPart = st.buf.slice(0, cut);
+        v1 = st.buf.slice(cut).trim();
+      }
+    }
+    st.buf = oldPart;
+    flush();
+    st.chapter += 1;
+    st.verse = 1;
+    st.buf = v1.replace(new RegExp('^' + st.chapter + '(?!\\d)\\s*'), ''); // evtl. mitgelesene Kapitelzahl entfernen
+    st.bounds = [];
+    st.provisional = false;
+    notes.resets = (notes.resets || 0) + 1;
+    setVerse(n);
   };
   const append = (text) => {
     if (!st.book || !st.chapter || st.verse < 1 || !text) return;
@@ -230,6 +259,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     out.push(b);
   }
   const xrefCount = Object.values(xrefs).reduce((n, l) => n + l.length, 0);
+  if (notes.resets) notes.fallbacks.push(`${notes.resets} Kapitelanfänge über die Versnummern erkannt (die große Kapitelzahl war im PDF nicht lesbar)`);
   return { name: guessName(meta, file.name), books: out, xrefs, report: { ...buildReport(out), ...notes, xrefs: xrefCount } };
 
   // -------------------------------------------------------------------------
@@ -256,9 +286,18 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     for (const i of items) {
       const rel = i.size / body;
       const tr = i.s.trim();
-      if (rel > 1.6 && /^\d{1,3}$/.test(tr)) drops.push(i);
+      if (rel > 1.25 && /^\d{1,3}$/.test(tr)) drops.push(i);
       else if (rel > 1.3 && tr) titles.push(i);
       else normal.push(i);
+    }
+    // Große Schrift, die kein mittig gesetzter Titel ist (z. B. Initialen in der Spalte), als Text behandeln
+    if (titles.length) {
+      const cx = titles.reduce((a, i) => a + i.x + i.w / 2, 0) / titles.length;
+      const letters = titles.map((i) => i.s).join('').replace(/[^A-Za-zÄÖÜäöüß]/g, '').length;
+      if (Math.abs(cx - pageWidth / 2) > pageWidth * 0.2 || letters < 4) {
+        normal.push(...titles);
+        titles.length = 0;
+      }
     }
 
     // Kopfzeile (Seitenzahl + Buch + Kapitel) oben entfernen
@@ -332,6 +371,9 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
         prevY = l.y;
       }
       const spacing = gaps.length ? weightedMode(gaps.filter((g) => g > 0).map((g) => [g, 1])) || body * 1.2 : body * 1.2;
+      // linker Spaltenrand (häufigster Zeilenanfang)
+      const starts = lines.filter((l) => !l.drop).map((l) => [Math.round(Math.min(...l.items.map((i) => i.x))), 1]);
+      const colLeft = starts.length ? weightedMode(starts) : 0;
 
       prevY = null;
       for (const l of lines) {
@@ -341,7 +383,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
         }
         const gapBefore = prevY == null ? Infinity : prevY - l.y;
         prevY = l.y;
-        handleLine(l, gapBefore, spacing, body, bodyFont);
+        handleLine(l, gapBefore, spacing, body, bodyFont, colLeft);
       }
     }
   }
@@ -364,8 +406,11 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     if (n > st.chapter && n <= st.chapter + 3) startChapter(n, 1);
   }
 
-  function handleLine(line, gapBefore, spacing, body, bodyFont) {
+  function handleLine(line, gapBefore, spacing, body, bodyFont, colLeft = 0) {
     if (st.suspended) return;
+    const skipped = () => {
+      st.skippedSince = true; // Überschrift o. Ä. übersprungen -> danach beginnt oft ein neuer Abschnitt
+    };
     const items = line.items.sort((a, b) => a.x - b.x);
     const normalItems = items.filter((i) => i.size >= body * 0.88 && i.s.trim());
     const baseline = normalItems.length ? Math.min(...normalItems.map((i) => i.y)) : line.y;
@@ -376,6 +421,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     if (smallChars / chars > 0.6) {
       const t = joinText(items);
       if (REF_LIST.test(t)) pendingRefs.push(...parseRefList(t));
+      skipped();
       return;
     }
 
@@ -409,6 +455,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     const letters = text.replace(/[^A-Za-zÄÖÜäöüß]/g, '');
     if (letters.length >= 6 && letters === letters.toUpperCase()) {
       st.inHeading = true;
+      skipped();
       return;
     }
     // Zwischenüberschrift: ganze Zeile in anderer Schrift als der Fließtext, mit Abstand davor
@@ -416,6 +463,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     const allOther = realSegs.length && realSegs.every((g) => g.font !== bodyFont);
     if (allOther && !/^\d/.test(text) && (gapBefore > spacing * 1.4 || st.inHeading)) {
       st.inHeading = true;
+      skipped();
       return;
     }
     if (REF_LIST.test(text)) {
@@ -423,9 +471,15 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       // Sie werden als Querverweise für den folgenden Vers gemerkt.
       pendingRefs.push(...parseRefList(text));
       st.inHeading = false;
+      skipped();
       return;
     }
     st.inHeading = false;
+    // Mögliche Stelle für einen neuen Vers 1: nach einer Überschrift, eingerückt (neben der
+    // großen Kapitelzahl) oder nach einem größeren Abstand
+    const indent = Math.min(...items.map((i) => i.x)) - colLeft > body * 1.2;
+    st.boundaryTier = st.skippedSince ? 3 : indent ? 2 : gapBefore > spacing * 1.6 ? 1 : 0;
+    st.skippedSince = false;
 
     // Versnummern finden
     let first = true;
@@ -445,6 +499,12 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
           if (st.provisional && st.verse <= 1 && n >= 2) st.provisional = false;
           setVerse(n);
           s = m[2];
+        } else if (
+          !plausible && st.chapter && g.font !== bodyFont && st.verse >= 3 &&
+          (n === 1 || (n === 2 && st.book !== 19))
+        ) {
+          chapterReset(n);
+          s = m[2];
         }
       }
       first = false;
@@ -461,6 +521,13 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     }
     if (st.lineBreak) {
       st.lineBreak = false;
+      if (st.buf) {
+        let tier = st.boundaryTier || 0;
+        // schwächster Hinweis: vorige Zeile endet mit Satzende, neue beginnt groß
+        if (!tier && !(/[.!?»“"]\s*$/.test(st.buf) && /^\s*[A-ZÄÖÜ»„"]/.test(s))) tier = -1;
+        if (tier >= 0) (st.bounds ||= []).push({ pos: st.buf.replace(/\s+$/, '').length + 1, tier });
+      }
+      st.boundaryTier = 0;
       append(s);
     } else {
       if (!st.book || !st.chapter || st.verse < 1) return;
