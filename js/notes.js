@@ -1244,8 +1244,58 @@ class Ink {
 
     // Lange Berührungen (Handballen) dürfen weder Lupe noch Kopieren-Menü öffnen
     c.addEventListener('touchstart', (e) => {
-      if (this.ed.mode === 'draw') e.preventDefault();
+      if (this.ed.mode !== 'draw') return;
+      e.preventDefault();
+      // „Nur Pencil“: ein Finger scrollt die Notiz (über Touch-Ereignisse – auf dem iPad am zuverlässigsten)
+      cancelAnimationFrame(this.glide);
+      const t = e.changedTouches[0];
+      if (!this.pencilOnly || e.touches.length !== 1 || t.touchType === 'stylus' || this.penActive()) {
+        this.tpan = null;
+        return;
+      }
+      this.tpan = { id: t.identifier, y: t.clientY, top: this.ed.el.scroll.scrollTop, on: false, hist: [[performance.now(), t.clientY]] };
     }, { passive: false });
+    c.addEventListener('touchmove', (e) => {
+      const tp = this.tpan;
+      if (!tp) return;
+      e.preventDefault();
+      if (e.touches.length !== 1 || this.penActive()) return (this.tpan = null);
+      const t = [...e.touches].find((x) => x.identifier === tp.id);
+      if (!t) return;
+      if (this.current?.finger) return; // Finger markiert gerade Bibeltext
+      const dy = t.clientY - tp.y;
+      if (!tp.on && Math.abs(dy) < 6) return;
+      if (!tp.on) {
+        tp.on = true;
+        tp.y = t.clientY; // ab hier ohne Sprung scrollen
+        tp.top = this.ed.el.scroll.scrollTop;
+      }
+      this.ed.el.scroll.scrollTop = tp.top - (t.clientY - tp.y);
+      const now = performance.now();
+      tp.hist.push([now, t.clientY]);
+      while (tp.hist.length > 2 && now - tp.hist[0][0] > 100) tp.hist.shift();
+    }, { passive: false });
+    const tend = () => {
+      const tp = this.tpan;
+      this.tpan = null;
+      if (!tp?.on || tp.hist.length < 2) return;
+      // Schwung: nach dem Loslassen weitergleiten und sanft abbremsen
+      const [t0, y0] = tp.hist[0];
+      const [t1, y1] = tp.hist[tp.hist.length - 1];
+      let v = t1 > t0 ? (y1 - y0) / (t1 - t0) : 0; // px pro ms
+      if (Math.abs(v) < 0.3 || performance.now() - t1 > 80) return;
+      let last = performance.now();
+      const step = (now) => {
+        const dt = now - last;
+        last = now;
+        this.ed.el.scroll.scrollTop -= v * dt;
+        v *= Math.pow(0.995, dt);
+        if (Math.abs(v) > 0.02) this.glide = requestAnimationFrame(step);
+      };
+      this.glide = requestAnimationFrame(step);
+    };
+    c.addEventListener('touchend', tend);
+    c.addEventListener('touchcancel', () => (this.tpan = null));
     c.addEventListener('contextmenu', (e) => e.preventDefault());
 
     c.addEventListener('pointerdown', (e) => {
@@ -1263,7 +1313,7 @@ class Ink {
           toast('Apple Pencil erkannt – ab jetzt zeichnet nur der Stift, der Finger scrollt.');
         }
       } else if (e.pointerType === 'touch') {
-        const palm = (e.width || 0) > PALM_SIZE || (e.height || 0) > PALM_SIZE;
+        const palm = !this.pencilOnly && ((e.width || 0) > PALM_SIZE || (e.height || 0) > PALM_SIZE);
         if (palm || this.penActive()) return; // Handballen ignorieren
         if (this.pencilOnly) {
           capture(c, e.pointerId);
@@ -1276,7 +1326,7 @@ class Ink {
             };
             return;
           }
-          // Finger scrollt, Pencil zeichnet
+          // Finger scrollt (siehe touchmove), Pencil zeichnet – hier nur für das Antippen merken
           this.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), top: this.ed.el.scroll.scrollTop };
           return;
         }
@@ -1329,7 +1379,7 @@ class Ink {
     c.addEventListener('pointermove', (e) => {
       if (this.pan && e.pointerId === this.pan.id) {
         if (this.penActive()) return (this.pan = null);
-        this.ed.el.scroll.scrollTop = this.pan.top - (e.clientY - this.pan.y);
+        if (!('ontouchstart' in window)) this.ed.el.scroll.scrollTop = this.pan.top - (e.clientY - this.pan.y); // ohne Touch-Ereignisse
         return;
       }
       const cur = this.current;
@@ -1344,7 +1394,7 @@ class Ink {
             // senkrecht -> doch scrollen
             this.current = null;
             this.pan = { id: cur.id, x: cur.x0, y: cur.y0, t: 0, top: cur.top };
-            this.ed.el.scroll.scrollTop = cur.top - (e.clientY - cur.y0);
+            if (!('ontouchstart' in window)) this.ed.el.scroll.scrollTop = cur.top - (e.clientY - cur.y0);
             return;
           }
           if (dx <= 8) return;
