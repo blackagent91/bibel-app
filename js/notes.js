@@ -1433,6 +1433,11 @@ class Ink {
         this.changed(); // ganze Zeichnung neu (Teile wurden gelöscht)
         return;
       }
+      // Linie verlängern: liegt sie auf derselben Spur wie eine vorhandene Linie und schließt an, verbinden
+      if (cur.s.k === 'line' && this.mergeLine(cur.s)) {
+        this.changed();
+        return;
+      }
       // Strich in die fertige Zeichnung übernehmen – ohne alles neu zu malen
       this.strokes.push(cur.s);
       if (cur.s.t === 'marker') {
@@ -1559,6 +1564,9 @@ class Ink {
     if (!cur?.s || cur.s.p.length < 15) return false;
     const shape = recognizeShape(cur.s.p, held ? 0 : AUTO_SHAPE_SIZE);
     if (!shape) return false;
+    // Linien und Vierecke auf das gewählte Papier-Raster legen
+    const snapped = shape.poly && snapToPaper(shape.kind, shape.poly, this.ed.el.page.dataset.paper);
+    if (snapped) shape.points = densify(snapped, shape.closed, shape.pr);
     cur.s.p = shape.points;
     cur.snapped = shape.kind;
     cur.s.k = shape.kind;
@@ -1649,6 +1657,42 @@ class Ink {
       return;
     }
     this.changed();
+  }
+
+  /**
+   * Neue Linie mit einer vorhandenen Linie auf derselben Spur verbinden (Verlängern).
+   * @returns {boolean} true, wenn verbunden wurde (die neue Linie ersetzt dann die alte)
+   */
+  mergeLine(s) {
+    const a = [s.p[0], s.p[1]];
+    const z = [s.p[s.p.length - 3], s.p[s.p.length - 2]];
+    const len = Math.hypot(z[0] - a[0], z[1] - a[1]);
+    if (len < 4) return false;
+    const ux = (z[0] - a[0]) / len, uy = (z[1] - a[1]) / len;
+    const step = gridStep(this.ed.el.page.dataset.paper);
+    const gap = Math.max(16, step * 0.6); // Haken an den Enden werden abgeschnitten -> etwas Luft lassen
+    const tol = step ? 3 : 6; // auf dem Raster liegen Linien exakt, ohne Raster etwas großzügiger
+    for (const o of this.strokes) {
+      if (o.k !== 'line' || o.t !== s.t || o.c !== s.c) continue;
+      const b = [o.p[0], o.p[1]];
+      const y = [o.p[o.p.length - 3], o.p[o.p.length - 2]];
+      // beide Endpunkte der alten Linie liegen auf der Spur der neuen?
+      const off = (q) => Math.abs(-(q[0] - a[0]) * uy + (q[1] - a[1]) * ux);
+      if (off(b) > tol || off(y) > tol) continue;
+      // Abschnitte auf der Spur: berühren oder überlappen sie sich?
+      const t = (q) => (q[0] - a[0]) * ux + (q[1] - a[1]) * uy;
+      const n0 = 0, n1 = len;
+      const o0 = Math.min(t(b), t(y)), o1 = Math.max(t(b), t(y));
+      if (o0 > n1 + gap || o1 < n0 - gap) continue;
+      const t0 = Math.min(n0, o0), t1 = Math.max(n1, o1);
+      const pr = s.p[2];
+      const pts = densify([[a[0] + ux * t0, a[1] + uy * t0], [a[0] + ux * t1, a[1] + uy * t1]], false, pr);
+      const merged = { ...o, p: pts, w: Math.max(o.w, s.w) };
+      this.strokes = this.strokes.map((x) => (x === o ? merged : x));
+      toast('Linie verlängert', 1000);
+      return true;
+    }
+    return false;
   }
 
   /** Tipp auf ein Wort im Bibeltext: Markierung entfernen bzw. Wort markieren */
@@ -1913,7 +1957,7 @@ export function recognizeShape(p, minSize = 0) {
   const big = diag >= minSize; // Linien und Kreise nur groß automatisch (Handschrift: „l“, „o“ …)
   const A = pts[0], Z = pts[n - 1];
   const chord = Math.hypot(Z[0] - A[0], Z[1] - A[1]);
-  const out = (kind, poly, closed) => ({ kind, points: densify(poly, closed, pr) });
+  const out = (kind, poly, closed) => ({ kind, poly, closed, pr, points: densify(poly, closed, pr) });
 
   // --- gerade Linie: beste Gerade durch die Punkte (ohne die Haken beim Aufsetzen/Abheben)
   if (chord > 0.75 * len) {
@@ -1965,7 +2009,6 @@ export function recognizeShape(p, minSize = 0) {
     }
     return maxD <= Math.max(3, diag * 0.1) && sum / pts.length <= Math.max(1.6, diag * 0.04);
   };
-  if (poly.length === 3 && straight(poly)) return out('triangle', poly, true);
   if (poly.length === 4 && straight(poly)) {
     const angles = poly.map((q, i) => angleAt(poly[(i + 3) % 4], q, poly[(i + 1) % 4]));
     if (angles.every((g) => Math.abs(g - 90) < 25)) {
@@ -2049,6 +2092,49 @@ function findMoveTarget(strokes, x, y) {
     }
   }
   return items;
+}
+
+// Papier-Raster (muss zu den Hintergründen in app.css passen; Koordinaten = Seitenkoordinaten)
+const PAPER_GRID = {
+  dots: { step: 24, ox: 12, oy: 12 }, // Punkte in der Mitte jeder 24-px-Zelle
+  grid: { step: 28, ox: 0.5, oy: 0.5 }, // Kästchenlinien am Anfang jeder 28-px-Zelle
+  lines: { step: 34, ox: null, oy: 33.5 }, // Linien am unteren Rand jeder 34-px-Zeile (nur senkrecht einrasten)
+};
+
+function gridStep(paper) {
+  return PAPER_GRID[paper]?.step || 0;
+}
+
+/** Eckpunkte einer Linie/eines Vierecks auf das Papier-Raster legen (oder null, wenn kein Raster) */
+function snapToPaper(kind, poly, paper) {
+  const g = PAPER_GRID[paper];
+  if (!g || (kind !== 'line' && kind !== 'rect')) return null;
+  const sx = (x) => (g.ox == null ? x : g.ox + Math.round((x - g.ox) / g.step) * g.step);
+  const sy = (y) => g.oy + Math.round((y - g.oy) / g.step) * g.step;
+  if (kind === 'line') {
+    const [a, z] = poly;
+    const horizontal = Math.abs(a[1] - z[1]) < 0.5;
+    const vertical = Math.abs(a[0] - z[0]) < 0.5;
+    if (g.ox == null) {
+      // Linien-Papier: nur waagerechte Linien auf die Papierlinie legen
+      if (!horizontal) return null;
+      const yy = sy(a[1]);
+      return [[a[0], yy], [z[0], yy]];
+    }
+    let A = [sx(a[0]), sy(a[1])], Z = [sx(z[0]), sy(z[1])];
+    if (horizontal) Z = [Z[0], A[1]];
+    if (vertical) Z = [A[0], Z[1]];
+    if (A[0] === Z[0] && A[1] === Z[1]) return null; // zu kurz für das Raster
+    return [A, Z];
+  }
+  // Viereck: achsenparallel -> Ecken aufs Raster, sonst unverändert
+  const xs = poly.map((q) => q[0]), ys = poly.map((q) => q[1]);
+  const axis = poly.every((q) => xs.some((x) => Math.abs(x - q[0]) < 0.5) && ys.some((y) => Math.abs(y - q[1]) < 0.5)) &&
+    new Set(xs.map(Math.round)).size <= 2 && new Set(ys.map(Math.round)).size <= 2;
+  if (!axis) return null;
+  let x0 = sx(Math.min(...xs)), x1 = sx(Math.max(...xs)), y0 = sy(Math.min(...ys)), y1 = sy(Math.max(...ys));
+  if (x0 === x1 || y0 === y1) return null;
+  return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
 }
 
 /** Punkte in gleichmäßigem Abstand neu abtasten (glättet das Zittern vieler Stiftpunkte) */
