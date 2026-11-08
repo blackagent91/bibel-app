@@ -311,10 +311,19 @@
     </section>
 
     <!-- Im Vollbild: zur anderen Seite wechseln -->
-    <button class="focus-switch hidden" id="focus-switch">
-      <svg viewBox="0 0 24 24"><path d="M7 7h13M16 3l4 4-4 4M17 17H4M8 13l-4 4 4 4"/></svg>
-      <span id="focus-switch-label">Zur Bibel</span>
-    </button>
+    <div class="focus-bar hidden" id="focus-bar">
+      <button class="focus-nav" id="focus-prev" title="Vorherige Notiz" aria-label="Vorherige Notiz">
+        <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <button class="focus-switch" id="focus-switch">
+        <svg viewBox="0 0 24 24"><path d="M7 7h13M16 3l4 4-4 4M17 17H4M8 13l-4 4 4 4"/></svg>
+        <span id="focus-switch-label">Zur Bibel</span>
+        <span class="focus-count" id="focus-count"></span>
+      </button>
+      <button class="focus-nav" id="focus-next" title="Nächste Notiz" aria-label="Nächste Notiz">
+        <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
 
     <!-- Mobile Umschalter -->
     <nav class="mobile-tabs" id="mobile-tabs">

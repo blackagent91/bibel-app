@@ -25,7 +25,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '44 · 08.11.2026';
+export const APP_VERSION = '45 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -342,6 +342,7 @@ function renderFilters() {
 }
 
 function renderDrawer() {
+  updateFocusCount();
   if (!drawer.classList.contains('open')) return;
   renderFilters();
   const q = $('#drawer-search').value.trim().toLowerCase();
@@ -531,6 +532,8 @@ function bindLayout() {
   // Vollbild-Knöpfe und Umschalter
   $$('.focus-btn').forEach((b) => (b.onclick = () => setFocus(state.focus === b.dataset.focus ? null : b.dataset.focus)));
   $('#focus-switch').onclick = () => setFocus(state.focus === 'notes' ? 'bible' : 'notes');
+  $('#focus-prev').onclick = () => stepNote(-1);
+  $('#focus-next').onclick = () => stepNote(1);
   window.matchMedia('(max-width: 760px)').addEventListener?.('change', () => state.focus && setFocus(null));
 
   // Seiten tauschen: Griff antippen oder zur Seite ziehen
@@ -591,14 +594,38 @@ function setFocus(which) {
   state.focus = which;
   app.classList.toggle('focus-notes', which === 'notes');
   app.classList.toggle('focus-bible', which === 'bible');
-  const sw = $('#focus-switch');
-  sw.classList.toggle('hidden', !which);
+  const bar = $('#focus-bar');
+  bar.classList.toggle('hidden', !which);
+  bar.classList.toggle('notes', which === 'notes');
   $('#focus-switch-label').textContent = which === 'notes' ? 'Zur Bibel' : 'Zu den Notizen';
+  updateFocusCount();
   $$('.focus-btn').forEach((b) => {
     const on = state.focus === b.dataset.focus;
     b.title = on ? 'Vollbild beenden' : b.dataset.focus === 'notes' ? 'Notizen im Vollbild' : 'Bibel im Vollbild';
   });
   bible.positionMenu?.();
+}
+
+/** Im Notizen-Vollbild: „2 / 5“ anzeigen */
+function updateFocusCount() {
+  const el = $('#focus-count');
+  if (!el) return;
+  if (state.focus !== 'notes') return (el.textContent = '');
+  const list = sortedNotes();
+  const i = list.findIndex((n) => n.id === state.current?.id);
+  el.textContent = list.length > 1 || i < 0 ? `${i < 0 ? '–' : i + 1} / ${list.length}` : '';
+}
+
+/** Im Notizen-Vollbild durch die Notizen blättern (Reihenfolge wie im Verzeichnis, am Ende wieder von vorn) */
+function stepNote(dir) {
+  editor.save.flush();
+  const list = sortedNotes();
+  if (!list.length) return toast('Noch keine Notizen');
+  const i = list.findIndex((n) => n.id === state.current?.id);
+  if (i >= 0 && list.length === 1) return toast('Das ist die einzige Notiz');
+  const next = i < 0 ? (dir > 0 ? 0 : list.length - 1) : (i + dir + list.length) % list.length;
+  openNote(list[next].id);
+  updateFocusCount();
 }
 
 function applySwap() {
