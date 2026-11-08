@@ -31,7 +31,8 @@ const MIN_SCALE = 0.5;
 const MAX_SCALE = 1.35;
 const MOVE_HOLD_MS = 500; // so lange auf einer Form halten, um sie zu verschieben
 const HOLD_MS = 550; // so lange den Stift ruhig halten, damit eine Form einrastet
-const AUTO_SHAPE_SIZE = 75; // ab dieser Größe (px Diagonale) werden Formen automatisch erkannt // Kontaktfläche (px), ab der eine Berührung als Handballen gilt
+const AUTO_SHAPE_SIZE = 75;
+const LINE_AUTO_SIZE = 50; // gerade Linien schon ab ~1,3 cm automatisch (Unterstreichen) // ab dieser Größe (px Diagonale) werden Formen automatisch erkannt // Kontaktfläche (px), ab der eine Berührung als Handballen gilt
 
 /** HTML eines Bibelstellen-Blocks */
 export function scriptureHTML(p, color = 'yellow') {
@@ -1890,7 +1891,15 @@ function upgradeScriptureBlocks(root) {
 export function recognizeShape(p, minSize = 0) {
   const pts = [];
   let pr = 0;
-  for (let i = 0; i < p.length; i += 3) { pts.push([p[i], p[i + 1]]); pr += p[i + 2]; }
+  const raw = [];
+  for (let i = 0; i < p.length; i += 3) { raw.push([p[i], p[i + 1]]); pr += p[i + 2]; }
+  pr = pr / raw.length;
+  {
+    let rx0 = Infinity, ry0 = Infinity, rx1 = -Infinity, ry1 = -Infinity;
+    for (const [x, y] of raw) { rx0 = Math.min(rx0, x); rx1 = Math.max(rx1, x); ry0 = Math.min(ry0, y); ry1 = Math.max(ry1, y); }
+    pts.push(...resample(raw, Math.max(3, Math.hypot(rx1 - rx0, ry1 - ry0) / 40)));
+  }
+  pr *= pts.length; // (Durchschnitt wird unten berechnet)
   pr = Math.round((pr / pts.length) * 100) / 100;
   const n = pts.length;
   if (n < 5) return null;
@@ -1906,16 +1915,37 @@ export function recognizeShape(p, minSize = 0) {
   const chord = Math.hypot(Z[0] - A[0], Z[1] - A[1]);
   const out = (kind, poly, closed) => ({ kind, points: densify(poly, closed, pr) });
 
-  // --- gerade Linie
-  if (chord > 0.8 * len) {
-    const maxDev = Math.max(...pts.map(([x, y]) => distToSeg(x, y, A, Z)));
-    if (maxDev <= Math.max(3.5, chord * 0.05)) {
-      let a = A, z = Z;
+  // --- gerade Linie: beste Gerade durch die Punkte (ohne die Haken beim Aufsetzen/Abheben)
+  if (chord > 0.75 * len) {
+    const cut = Math.max(1, Math.round(n * 0.07));
+    const core = n > 8 ? pts.slice(cut, n - cut) : pts;
+    // Hauptrichtung (Hauptkomponente) der Punkte
+    let mx = 0, my = 0;
+    for (const [x, y] of core) { mx += x; my += y; }
+    mx /= core.length; my /= core.length;
+    let sxx = 0, syy = 0, sxy = 0;
+    for (const [x, y] of core) { sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy += (x - mx) * (y - my); }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    const ux = Math.cos(th), uy = Math.sin(th);
+    let maxDev = 0, sq = 0;
+    for (const [x, y] of core) {
+      const d = Math.abs(-(x - mx) * uy + (y - my) * ux);
+      maxDev = Math.max(maxDev, d);
+      sq += d * d;
+    }
+    const rms = Math.sqrt(sq / core.length);
+    if (maxDev <= Math.max(4, chord * 0.07) && rms <= Math.max(1.8, chord * 0.03)) {
+      if (diag < LINE_AUTO_SIZE && !(minSize === 0)) return null; // kurze Striche (Handschrift) nur nach Halten
+      // Endpunkte: alle Punkte auf die Gerade projizieren (Haken zählen hier nicht)
+      let t0 = Infinity, t1 = -Infinity;
+      for (const [x, y] of core) { const t = (x - mx) * ux + (y - my) * uy; t0 = Math.min(t0, t); t1 = Math.max(t1, t); }
+      let a = [mx + ux * t0, my + uy * t0], z = [mx + ux * t1, my + uy * t1];
+      // Richtung wie gezeichnet beibehalten
+      if ((Z[0] - A[0]) * ux + (Z[1] - A[1]) * uy < 0) [a, z] = [z, a];
       const ang = (Math.atan2(z[1] - a[1], z[0] - a[0]) * 180) / Math.PI;
       const near = (t) => Math.abs(((ang - t + 540) % 360) - 180) < 8;
-      if (near(0) || near(180)) z = [z[0], a[1]]; // waagerecht
-      else if (near(90) || near(-90)) z = [a[0], z[1]]; // senkrecht
-      if (!big) return null;
+      if (near(0) || near(180)) { const yy = (a[1] + z[1]) / 2; a = [a[0], yy]; z = [z[0], yy]; } // waagerecht
+      else if (near(90) || near(-90)) { const xx = (a[0] + z[0]) / 2; a = [xx, a[1]]; z = [xx, z[1]]; } // senkrecht
       return out('line', [a, z], false);
     }
     return null;
@@ -2019,6 +2049,32 @@ function findMoveTarget(strokes, x, y) {
     }
   }
   return items;
+}
+
+/** Punkte in gleichmäßigem Abstand neu abtasten (glättet das Zittern vieler Stiftpunkte) */
+function resample(pts, step) {
+  if (pts.length < 3) return pts.slice();
+  const out = [pts[0]];
+  let [px, py] = pts[0];
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    let [x, y] = pts[i];
+    let d = Math.hypot(x - px, y - py);
+    while (acc + d >= step) {
+      const t = (step - acc) / d;
+      px = px + (x - px) * t;
+      py = py + (y - py) * t;
+      out.push([px, py]);
+      d = Math.hypot(x - px, y - py);
+      acc = 0;
+    }
+    acc += d;
+    px = x;
+    py = y;
+  }
+  const last = pts[pts.length - 1];
+  if (Math.hypot(last[0] - out[out.length - 1][0], last[1] - out[out.length - 1][1]) > step * 0.3) out.push(last);
+  return out;
 }
 
 function distToSeg(x, y, a, b) {

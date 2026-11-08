@@ -44,7 +44,7 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
   Textmarker, Radierer, Farben, Strichstärken.
   „Nur Pencil“: Der Stift zeichnet, mit dem Finger scrollst du.
 - **Formen erkennen:** gerade Linien, Dreiecke, Vierecke, Kreise und Ellipsen werden begradigt –
-  Vierecke und Dreiecke auch klein automatisch, Linien und Kreise ab etwa 2 cm (kleiner nach kurzem Halten des Stifts). Fast waagerechte/senkrechte
+  Vierecke und Dreiecke auch klein automatisch, Linien ab etwa 1,3 cm, Kreise ab etwa 2 cm (kleiner nach kurzem Halten des Stifts). Fast waagerechte/senkrechte
   Linien rasten exakt ein (auch mit dem Textmarker zum Unterstreichen).
 - **Verschieben:** Stift auf einer Form oder einem Strich gut eine halbe Sekunde ruhig halten, dann ziehen.
   Umrahmtes (Kreis, Viereck, freie Schleife) wird samt Inhalt verschoben.
