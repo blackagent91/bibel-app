@@ -1,6 +1,6 @@
 // Linke Seite: Notiz-Editor (Text + Blöcke) und Zeichenebene für Apple Pencil
 import { formatRef } from './books.js';
-import { $, $$, esc, COLORS, debounce, caretRangeAt } from './util.js';
+import { $, $$, esc, COLORS, debounce, toast } from './util.js';
 
 const TEXT_COLORS = ['#f2f2f2', '#b4b4ba', '#e8c26e', '#6cd28c', '#6eaaff', '#ff78b4', '#aa82ff', '#ff9650', '#ff6b6b'];
 const HILITE = {
@@ -21,6 +21,8 @@ const BLOCK_COLORS = [
 ];
 const PEN_COLORS = ['#f2f2f2', '#e8c26e', '#6cd28c', '#6eaaff', '#ff78b4', '#aa82ff', '#ff6b6b', '#8a8a92'];
 const PEN_WIDTHS = [1.5, 2.5, 4, 7];
+const PALM_GRACE_MS = 900; // so lange nach dem Stift werden Berührungen der Hand ignoriert
+const PALM_SIZE = 40; // Kontaktfläche (px), ab der eine Berührung als Handballen gilt
 
 /** HTML eines Bibelstellen-Blocks */
 export function scriptureHTML(p, color = 'yellow') {
@@ -54,11 +56,55 @@ export class NotesEditor {
       saveState: $('#save-state'),
     };
     this.save = debounce(() => this.commit(), 500);
+    this.hist = [''];
+    this.hIdx = 0;
+    this.recordSoon = debounce(() => this.record(), 600);
     this.ink = new Ink(this);
     this.bindEditor();
     this.bindToolbar();
     this.bindBlocks();
     this.bindDrop();
+    this.bindUndo();
+  }
+
+  // ------------------------------------------------------------------ Rückgängig: Knöpfe + Gesten
+  bindUndo() {
+    for (const [id, fn] of [['#btn-undo', () => this.undo()], ['#btn-redo', () => this.redo()]]) {
+      const b = $(id);
+      b.addEventListener('pointerdown', (e) => e.preventDefault()); // Fokus/Auswahl im Editor behalten
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', fn);
+    }
+    // Tipp mit 2 Fingern = Rückgängig, mit 3 Fingern = Wiederholen (wie in Notiz-Apps)
+    const body = this.el.body;
+    let tap = null;
+    const fingers = (list) => [...list].filter((t) => t.touchType !== 'stylus');
+    body.addEventListener('touchstart', (e) => {
+      const f = fingers(e.touches);
+      if (f.length !== e.touches.length || this.ink.penActive()) { tap = null; return; }
+      if (f.length >= 2) {
+        if (!tap) tap = { t: Date.now(), max: 0, pts: new Map() };
+        for (const t of f) if (!tap.pts.has(t.identifier)) tap.pts.set(t.identifier, [t.clientX, t.clientY]);
+        tap.max = Math.max(tap.max, f.length);
+      }
+    }, { passive: true });
+    body.addEventListener('touchmove', (e) => {
+      if (!tap) return;
+      for (const t of e.touches) {
+        const start = tap.pts.get(t.identifier);
+        if (start && Math.hypot(t.clientX - start[0], t.clientY - start[1]) > 14) { tap = null; return; }
+      }
+    }, { passive: true });
+    body.addEventListener('touchend', (e) => {
+      if (!tap || e.touches.length) return;
+      const ok = Date.now() - tap.t < 400 && !this.ink.penActive();
+      const n = tap.max;
+      tap = null;
+      if (!ok) return;
+      if (n === 2) this.undo();
+      else if (n >= 3) this.redo();
+    }, { passive: true });
+    body.addEventListener('touchcancel', () => (tap = null), { passive: true });
   }
 
   // ------------------------------------------------------------------ Laden / Speichern
@@ -67,6 +113,8 @@ export class NotesEditor {
     this.note = note;
     this.el.title.value = note?.title || '';
     this.el.editor.innerHTML = note?.html || '';
+    this.hist = [this.el.editor.innerHTML];
+    this.hIdx = 0;
     this.ink.setStrokes(note?.strokes || []);
     this.renderMeta();
     this.hideHandle();
@@ -111,6 +159,49 @@ export class NotesEditor {
     this.save();
   }
 
+  // ------------------------------------------------------------------ Rückgängig / Wiederholen
+  /** Aktuellen Textstand als Schritt im Verlauf merken */
+  record() {
+    this.recordSoon.cancel?.();
+    const html = this.el.editor.innerHTML;
+    if (html === this.hist[this.hIdx]) return;
+    this.hist = this.hist.slice(0, this.hIdx + 1);
+    this.hist.push(html);
+    if (this.hist.length > 200) this.hist.shift();
+    this.hIdx = this.hist.length - 1;
+  }
+
+  undo() {
+    if (this.mode === 'draw') return this.ink.undo();
+    this.record();
+    if (this.hIdx <= 0) return toast('Nichts mehr rückgängig zu machen');
+    this.restoreHist(--this.hIdx);
+  }
+
+  redo() {
+    if (this.mode === 'draw') return this.ink.redo();
+    this.record();
+    if (this.hIdx >= this.hist.length - 1) return;
+    this.restoreHist(++this.hIdx);
+  }
+
+  restoreHist(i) {
+    const ed = this.el.editor;
+    ed.innerHTML = this.hist[i];
+    this.hideHandle();
+    const last = ed.lastElementChild;
+    if (last && this.mode === 'text' && document.activeElement === ed) this.placeCaret(last, false);
+    this.changed();
+  }
+
+  /** Strukturelle Änderung (Block einfügen, verschieben …) als eigenen Schritt speichern */
+  structural(fn) {
+    this.record();
+    const res = fn();
+    this.record();
+    return res;
+  }
+
   renderMeta() {
     const refs = this.note?.refs || [];
     this.el.meta.innerHTML = refs
@@ -127,7 +218,11 @@ export class NotesEditor {
    * @param {object} payload Auswahl aus der Bibel
    * @param {{x?:number, y?:number, color?:string}} opts Ablageposition (Bildschirm) oder ans Ende
    */
-  insertScripture(payload, { x, y, color = 'yellow' } = {}) {
+  insertScripture(payload, opts = {}) {
+    return this.structural(() => this._insertScripture(payload, opts));
+  }
+
+  _insertScripture(payload, { x, y, color = 'yellow' } = {}) {
     const ed = this.el.editor;
     const tpl = document.createElement('template');
     tpl.innerHTML = scriptureHTML(payload, color);
@@ -203,7 +298,17 @@ export class NotesEditor {
   // ------------------------------------------------------------------ Editor-Ereignisse
   bindEditor() {
     const ed = this.el.editor;
-    ed.addEventListener('input', () => this.changed());
+    ed.addEventListener('input', () => {
+      this.changed();
+      this.recordSoon();
+    });
+    // System-Rückgängig (Cmd+Z, iPad-Tastatur, Wischgeste) auf unseren Verlauf umleiten
+    ed.addEventListener('beforeinput', (e) => {
+      if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
+        e.preventDefault();
+        e.inputType === 'historyUndo' ? this.undo() : this.redo();
+      }
+    });
     this.el.title.addEventListener('input', () => this.changed());
     this.el.title.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -245,6 +350,7 @@ export class NotesEditor {
         if (e.clientX - r.left < 26) {
           li.classList.toggle('done');
           this.changed();
+          this.record();
         }
       }
     });
@@ -254,6 +360,14 @@ export class NotesEditor {
       if (e.key === 'Tab') {
         e.preventDefault();
         document.execCommand(e.shiftKey ? 'outdent' : 'indent');
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        e.shiftKey ? this.redo() : this.undo();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        this.redo();
       }
     });
 
@@ -345,7 +459,7 @@ export class NotesEditor {
           document.execCommand('foreColor', false, t.dataset.color);
           $('.a-color').style.borderBottomColor = t.dataset.color;
         } else if (t.dataset.block) {
-          this.insertCallout(t.dataset.block);
+          this.structural(() => this.insertCallout(t.dataset.block));
         }
         this.closePops();
         this.changed();
@@ -378,6 +492,7 @@ export class NotesEditor {
 
   exec(cmd) {
     const ed = this.el.editor;
+    this.record();
     switch (cmd) {
       case 'bigger':
       case 'smaller': {
@@ -420,6 +535,7 @@ export class NotesEditor {
         document.execCommand(cmd);
     }
     this.changed();
+    this.record();
     this.syncToolbar();
   }
 
@@ -486,6 +602,7 @@ export class NotesEditor {
       const act = e.target.closest('[data-act]')?.dataset.act;
       const blk = this.handleBlock;
       if (!act || !blk) return;
+      this.record();
       if (act === 'up' && blk.previousElementSibling) blk.previousElementSibling.before(blk);
       if (act === 'down' && blk.nextElementSibling) blk.nextElementSibling.after(blk);
       if (act === 'dup') blk.after(blk.cloneNode(true));
@@ -498,6 +615,7 @@ export class NotesEditor {
         blk.remove();
         this.hideHandle();
       }
+      this.record();
       this.changed();
       this.save.flush();
       if (act !== 'del') this.positionHandle();
@@ -617,6 +735,7 @@ class Ink {
   setStrokes(strokes) {
     this.strokes = strokes.map((s) => ({ ...s, p: [...s.p] }));
     this.undoStack = [];
+    this.redoStack = [];
     this.schedule();
   }
 
@@ -641,16 +760,10 @@ class Ink {
       $$('.pen-width', widths).forEach((x) => x.classList.toggle('active', x === b));
     });
     $$('[data-pen]').forEach((b) => (b.onclick = () => this.setTool(b.dataset.pen)));
-    const po = $('#pencil-only');
-    po.onclick = () => {
-      this.pencilOnly = !this.pencilOnly;
-      po.classList.toggle('active', this.pencilOnly);
-      try { localStorage.setItem('pencilOnly', this.pencilOnly ? '1' : '0'); } catch {}
-    };
+    $('#pencil-only').onclick = () => this.setPencilOnly(!this.pencilOnly);
     try {
-      if (localStorage.getItem('pencilOnly') === '1') po.click();
+      if (localStorage.getItem('pencilOnly') === '1') this.setPencilOnly(true);
     } catch {}
-    $('#draw-undo').onclick = () => this.undo();
     $('#draw-clear').onclick = () => {
       if (!this.strokes.length) return;
       if (!confirm('Alle Zeichnungen dieser Notiz löschen?')) return;
@@ -667,11 +780,19 @@ class Ink {
 
   pushUndo() {
     this.undoStack.push(this.strokes.slice());
-    if (this.undoStack.length > 50) this.undoStack.shift();
+    if (this.undoStack.length > 100) this.undoStack.shift();
+    this.redoStack = [];
   }
   undo() {
-    if (!this.undoStack.length) return;
+    if (!this.undoStack.length) return toast('Nichts mehr rückgängig zu machen');
+    this.redoStack.push(this.strokes);
     this.strokes = this.undoStack.pop();
+    this.changed();
+  }
+  redo() {
+    if (!this.redoStack.length) return;
+    this.undoStack.push(this.strokes);
+    this.strokes = this.redoStack.pop();
     this.changed();
   }
   changed() {
@@ -685,34 +806,71 @@ class Ink {
     return [e.clientX - r.left, e.clientY - r.top];
   }
 
+  /** Stift ist gerade aktiv (oder war es eben noch) -> Handballen ignorieren */
+  penActive() {
+    return !!this.current?.pen || Date.now() - this.lastPen < PALM_GRACE_MS;
+  }
+
+  /** Während mit dem Pencil geschrieben wird: keine Textauswahl/Kopieren-Menü irgendwo */
+  markInking() {
+    document.body.classList.add('inking');
+    clearTimeout(this.inkingTimer);
+    this.inkingTimer = setTimeout(() => {
+      if (!this.current?.pen) document.body.classList.remove('inking');
+    }, PALM_GRACE_MS);
+  }
+
   bind() {
     const c = this.canvas;
+    this.redoStack = [];
+    this.lastPen = 0;
     new ResizeObserver(() => this.resize()).observe(this.ed.el.body);
     this.ed.el.scroll.addEventListener('scroll', () => this.schedule(), { passive: true });
 
+    // Lange Berührungen (Handballen) dürfen weder Lupe noch Kopieren-Menü öffnen
+    c.addEventListener('touchstart', (e) => {
+      if (this.ed.mode === 'draw') e.preventDefault();
+    }, { passive: false });
+    c.addEventListener('contextmenu', (e) => e.preventDefault());
+
     c.addEventListener('pointerdown', (e) => {
       if (this.ed.mode !== 'draw') return;
-      if (e.pointerType === 'touch' && (this.pencilOnly || this.current?.pen)) {
-        // Finger scrollt, Pencil zeichnet
-        this.pan = { id: e.pointerId, y: e.clientY, top: this.ed.el.scroll.scrollTop };
-        c.setPointerCapture(e.pointerId);
-        return;
+      e.preventDefault();
+      const isPen = e.pointerType === 'pen';
+
+      if (isPen) {
+        this.lastPen = Date.now();
+        this.pan = null; // Hand hat evtl. zuerst aufgesetzt -> Scrollen abbrechen
+        this.markInking();
+        if (!this.pencilOnly) {
+          // Apple Pencil erkannt: ab jetzt zeichnet nur noch der Stift
+          this.setPencilOnly(true);
+          toast('Apple Pencil erkannt – ab jetzt zeichnet nur der Stift, der Finger scrollt.');
+        }
+      } else if (e.pointerType === 'touch') {
+        const palm = (e.width || 0) > PALM_SIZE || (e.height || 0) > PALM_SIZE;
+        if (palm || this.penActive()) return; // Handballen ignorieren
+        if (this.pencilOnly) {
+          // Finger scrollt, Pencil zeichnet
+          this.pan = { id: e.pointerId, y: e.clientY, top: this.ed.el.scroll.scrollTop };
+          capture(c, e.pointerId);
+          return;
+        }
       }
       if (this.current) return;
-      e.preventDefault();
-      c.setPointerCapture(e.pointerId);
+      capture(c, e.pointerId);
       const [x, y] = this.toPage(e);
       if (this.tool === 'eraser') {
         this.pushUndo();
-        this.current = { eraser: true, id: e.pointerId };
+        this.current = { eraser: true, pen: isPen, id: e.pointerId };
         this.erase(x, y);
         return;
       }
       this.pushUndo();
-      const pr = e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5;
+      const pr = isPen ? e.pressure || 0.5 : 0.5;
       this.current = {
         id: e.pointerId,
-        pen: e.pointerType === 'pen',
+        pen: isPen,
         s: { t: this.tool, c: this.color, w: this.width, p: [r1(x), r1(y), r2(pr)] },
       };
       this.strokes.push(this.current.s);
@@ -721,10 +879,15 @@ class Ink {
 
     c.addEventListener('pointermove', (e) => {
       if (this.pan && e.pointerId === this.pan.id) {
+        if (this.penActive()) return (this.pan = null);
         this.ed.el.scroll.scrollTop = this.pan.top - (e.clientY - this.pan.y);
         return;
       }
       if (!this.current || e.pointerId !== this.current.id) return;
+      if (this.current.pen) {
+        this.lastPen = Date.now();
+        this.markInking();
+      }
       const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       for (const ev of events.length ? events : [e]) {
         const [x, y] = this.toPage(ev);
@@ -750,10 +913,17 @@ class Ink {
       if (!this.current || e.pointerId !== this.current.id) return;
       const cur = this.current;
       this.current = null;
+      if (cur.pen) {
+        this.lastPen = Date.now();
+        this.markInking();
+      }
       if (cur.eraser) {
         if (this.undoStack.length && this.undoStack[this.undoStack.length - 1].length === this.strokes.length) this.undoStack.pop();
         else this.ed.changed();
         return;
+      }
+      if (cur.s.t === 'pen' && this.scratchOut(cur.s)) {
+        toast('Durchgestrichenes gelöscht · Rückgängig mit 2-Finger-Tipp');
       }
       this.changed();
     };
@@ -762,6 +932,70 @@ class Ink {
     c.addEventListener('wheel', (e) => {
       this.ed.el.scroll.scrollTop += e.deltaY;
     }, { passive: true });
+  }
+
+  setPencilOnly(on) {
+    this.pencilOnly = on;
+    $('#pencil-only').classList.toggle('active', on);
+    try { localStorage.setItem('pencilOnly', on ? '1' : '0'); } catch {}
+  }
+
+  /**
+   * Zickzack-Kritzelei über Geschriebenem erkennen ("zack, zack, zack").
+   * Erkannt wird ein Strich, der mehrfach die Richtung umkehrt und bereits
+   * vorhandene Schrift überdeckt. Dann werden diese Schrift und die Kritzelei gelöscht.
+   * @returns {boolean} true, wenn etwas gelöscht wurde
+   */
+  scratchOut(s) {
+    const p = s.p;
+    const n = p.length / 3;
+    if (n < 8) return false;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, len = 0;
+    for (let i = 0; i < p.length; i += 3) {
+      minX = Math.min(minX, p[i]); maxX = Math.max(maxX, p[i]);
+      minY = Math.min(minY, p[i + 1]); maxY = Math.max(maxY, p[i + 1]);
+      if (i) len += Math.hypot(p[i] - p[i - 3], p[i + 1] - p[i - 2]);
+    }
+    const w = maxX - minX;
+    const h = maxY - minY;
+    if (Math.max(w, h) < 12) return false;
+    // Strichlänge im Verhältnis zur Größe: Zickzack ist viel länger als breit
+    if (len / Math.max(w, h) < 2.2) return false;
+
+    // Richtungsumkehrungen zählen (mit Toleranz, damit Zittern nicht zählt)
+    const reversals = (axis, size) => {
+      const thr = Math.max(6, size * 0.3);
+      let count = 0, dir = 0, ext = p[axis];
+      for (let i = axis + 3; i < p.length; i += 3) {
+        const v = p[i];
+        if (dir === 0) {
+          if (v > ext + thr) { dir = 1; ext = v; }
+          else if (v < ext - thr) { dir = -1; ext = v; }
+        } else if (dir === 1) {
+          if (v > ext) ext = v;
+          else if (v < ext - thr) { count++; dir = -1; ext = v; }
+        } else {
+          if (v < ext) ext = v;
+          else if (v > ext + thr) { count++; dir = 1; ext = v; }
+        }
+      }
+      return count;
+    };
+    if (Math.max(reversals(0, w), reversals(1, h)) < 3) return false;
+
+    // Welche vorhandenen Striche liegen unter der Kritzelei?
+    const pad = 6;
+    const inBox = (x, y) => x >= minX - pad && x <= maxX + pad && y >= minY - pad && y <= maxY + pad;
+    const targets = new Set();
+    for (const o of this.strokes) {
+      if (o === s) continue;
+      let inside = 0;
+      for (let i = 0; i < o.p.length; i += 3) if (inBox(o.p[i], o.p[i + 1])) inside++;
+      if (inside / (o.p.length / 3) >= 0.5) targets.add(o);
+    }
+    if (!targets.size) return false; // nichts darunter -> normaler Strich
+    this.strokes = this.strokes.filter((o) => o !== s && !targets.has(o));
+    return true;
   }
 
   erase(x, y) {
@@ -863,3 +1097,8 @@ class Ink {
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const r2 = (n) => Math.round(n * 100) / 100;
+function capture(el, id) {
+  try {
+    el.setPointerCapture(id);
+  } catch {}
+}

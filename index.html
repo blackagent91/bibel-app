@@ -33,6 +33,12 @@
           </div>
           <span class="spacer"></span>
           <span class="save-state" id="save-state"></span>
+          <button class="icon-btn" id="btn-undo" title="Rückgängig (Tipp mit 2 Fingern)" aria-label="Rückgängig">
+            <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
+          </button>
+          <button class="icon-btn" id="btn-redo" title="Wiederholen (Tipp mit 3 Fingern)" aria-label="Wiederholen">
+            <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3"/></svg>
+          </button>
           <button class="icon-btn" id="btn-new-note" title="Neue Notiz" aria-label="Neue Notiz">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
           </button>
@@ -90,13 +96,6 @@
           <button class="tool" data-cmd="hr" title="Trennlinie">
             <svg viewBox="0 0 24 24"><path d="M3 12h18"/></svg>
           </button>
-          <i class="sep"></i>
-          <button class="tool" data-cmd="undo" title="Rückgängig">
-            <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
-          </button>
-          <button class="tool" data-cmd="redo" title="Wiederholen">
-            <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3"/></svg>
-          </button>
         </div>
 
         <!-- Stift-Werkzeuge -->
@@ -117,9 +116,6 @@
           <i class="sep"></i>
           <button class="tool toggle" id="pencil-only" title="Nur Apple Pencil zeichnet – Finger scrollt">
             <svg viewBox="0 0 24 24"><path d="M15 4l5 5L9 20H4v-5L15 4z"/></svg><span>Nur Pencil</span>
-          </button>
-          <button class="tool" id="draw-undo" title="Letzten Strich rückgängig">
-            <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
           </button>
           <button class="tool" id="draw-clear" title="Zeichnung löschen">
             <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg>

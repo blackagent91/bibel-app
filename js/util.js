@@ -23,6 +23,7 @@ export function debounce(fn, ms) {
     clearTimeout(t);
     fn(...args);
   };
+  d.cancel = () => clearTimeout(t);
   return d;
 }
 
