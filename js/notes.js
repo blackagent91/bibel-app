@@ -1449,6 +1449,7 @@ class Ink {
       }
       // Strich in die fertige Zeichnung übernehmen – ohne alles neu zu malen
       this.strokes.push(cur.s);
+      this.fitPage();
       if (cur.s.t === 'marker') {
         // restliche Stücke des Markers fertig malen (die letzten Punkte kamen evtl. nach dem letzten Bild)
         if (!this.raf) {
@@ -1770,6 +1771,28 @@ class Ink {
     });
   }
 
+  /**
+   * Seite wächst mit der Handschrift: unter dem untersten Strich bleibt immer gut eine halbe
+   * Bildschirmhöhe frei, damit man mit dem Finger weiterscrollen und weiterschreiben kann.
+   */
+  fitPage(bottom) {
+    if (bottom == null) {
+      bottom = 0;
+      for (const s of this.strokes) {
+        let box = BOXES.get(s);
+        if (!box) BOXES.set(s, (box = bbox(s.p)));
+        if (box[3] > bottom) bottom = box[3];
+      }
+    }
+    const vis = this.ed.el.scroll.clientHeight / (this.ed.scale || 1);
+    if (!vis) return;
+    const h = Math.round(Math.max(vis * 1.5, bottom + vis * 0.6) / 50) * 50; // in Stufen, damit nichts zappelt
+    if (h !== this._pageH) {
+      this._pageH = h;
+      this.ed.el.page.style.minHeight = h + 'px';
+    }
+  }
+
   draw() {
     const ctx = this.ctx;
     const mctx = this.mctx;
@@ -1781,13 +1804,16 @@ class Ink {
     this.prepare(mctx);
     const minY = (-g.oy - 50) / g.scale;
     const maxY = (-g.oy + g.h + 50) / g.scale;
+    let bottom = 0;
     for (const s of this.strokes) {
       let box = BOXES.get(s);
       if (!box) BOXES.set(s, (box = bbox(s.p)));
+      if (box[3] > bottom) bottom = box[3];
       if (box[3] < minY || box[1] > maxY) continue; // nur sichtbare Striche zeichnen
       if (this.moving?.has(s)) continue; // wird gerade verschoben (Live-Ebene)
       this.drawStroke(s.t === 'marker' ? mctx : ctx, s);
     }
+    this.fitPage(bottom);
     // Marker, der gerade gemalt wird, gehört mit auf die Marker-Ebene
     const cur = this.current;
     if (cur?.s?.t === 'marker') {
