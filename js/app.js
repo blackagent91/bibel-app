@@ -16,8 +16,8 @@ const state = {
   drawerTab: 'notes',
 };
 
-export const APP_VERSION = '8 · 08.11.2026';
-const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50 };
+export const APP_VERSION = '9 · 08.11.2026';
+const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
 function readLS(key, fallback) {
@@ -391,6 +391,7 @@ function applySettings() {
   document.documentElement.style.setProperty('--bible-size', `${settings.bibleSize}px`);
   document.documentElement.style.setProperty('--note-size', `${settings.noteSize}px`);
   bible.setLayout(settings.layout, settings.font);
+  if (bible.xrefMode !== settings.xrefs) bible.setXrefMode(settings.xrefs);
   $('#out-bible-size').textContent = settings.bibleSize;
   $('#out-note-size').textContent = settings.noteSize;
 }
@@ -417,6 +418,7 @@ function bindSettings() {
     $('#set-note-size').value = settings.noteSize;
     $('#set-layout').value = settings.layout;
     $('#set-font').value = settings.font;
+    $('#set-xrefs').value = settings.xrefs;
     renderTranslations();
     modal.classList.remove('hidden');
   };
@@ -433,6 +435,7 @@ function bindSettings() {
   bindInput('#set-note-size', 'noteSize');
   bindInput('#set-layout', 'layout', false);
   bindInput('#set-font', 'font', false);
+  bindInput('#set-xrefs', 'xrefs', false);
 
   $('#translation').addEventListener('change', async (e) => {
     settings.trans = e.target.value;
@@ -490,6 +493,7 @@ function bindSettings() {
         <div><b>${r.books}/66</b><span>Bücher</span></div>
         <div><b>${r.chapters.toLocaleString('de-DE')}</b><span>Kapitel</span></div>
         <div><b>${r.verses.toLocaleString('de-DE')}</b><span>Verse</span></div></div>`;
+      if (r.xrefs) html += `<p class="hint">Dazu ${r.xrefs.toLocaleString('de-DE')} Parallelstellen aus den Zwischenüberschriften übernommen.</p>`;
       const issues = [
         ...(r.missingBooks.length ? [`Nicht gefunden: ${r.missingBooks.join(', ')}`] : []),
         ...r.chapterIssues,

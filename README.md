@@ -40,6 +40,14 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 - Stellen mit Notiz sind in der Bibel farbig hinterlegt und tragen ein kleines Notiz-Symbol.
   Tippst du darauf, öffnet sich die Notiz.
 
+**Querverweise / Parallelstellen**
+- Hat ein Vers Parallelstellen, ist seine **Versnummer blau**. Tippst du darauf, öffnet sich
+  ein Fenster mit den Stellen und ihrem Text. Ein Tipp auf eine Stelle springt dorthin (← führt zurück).
+- Quellen: die freie Querverweis-Sammlung von [OpenBible.info](https://www.openbible.info/labs/cross-references/)
+  (CC BY, für alle Übersetzungen) und bei einer per PDF importierten Bibel zusätzlich deren eigene
+  Stellenangaben unter den Zwischenüberschriften.
+- In den Einstellungen lassen sich die Querverweise ausblenden.
+
 ## Übersetzungen
 
 Eingebaut ist die **Elberfelder 1905** (gemeinfrei). Die Schlachter 2000 ist

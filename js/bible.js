@@ -1,6 +1,6 @@
 // Rechte Seite: Bibeltext, Inhaltsverzeichnis, Navigation, Auswahl, Suche
-import { BOOKS, getBook, parseRef, formatRef } from './books.js';
-import { getChapter, getBookData, getTranslation, chapterCount } from './translations.js';
+import { BOOKS, getBook, parseRef, formatRef, parseCompact } from './books.js';
+import { getChapter, getBookData, getTranslation, chapterCount, getXrefs } from './translations.js';
 import { $, $$, esc, COLORS } from './util.js';
 
 export class BibleView {
@@ -24,6 +24,9 @@ export class BibleView {
     this.layout = 'lines';
     this.searchScope = 'all';
     this.renderToken = 0;
+    this.showXrefs = true;
+    this.xrefMode = 'on'; // 'on' = wichtige markieren, 'all' = alle markieren
+    this.xrefs = new Map();
 
     this.el = {
       scroll: $('#bible-scroll'),
@@ -141,6 +144,84 @@ export class BibleView {
       .join('');
     this.el.text.innerHTML = head + `<div class="verses">${html}</div>`;
     this.applyMarks();
+    this.applyXrefs(token);
+  }
+
+  // ------------------------------------------------------------------ Querverweise
+  async applyXrefs(token = this.renderToken) {
+    $$('.vn.vn-x', this.el.text).forEach((n) => n.classList.remove('vn-x'));
+    this.xrefs = new Map();
+    if (!this.showXrefs) return;
+    const map = await getXrefs(this.trans, this.pos.book, this.pos.chapter);
+    if (token !== this.renderToken) return;
+    this.xrefs = map;
+    for (const [v, e] of map) {
+      const marked = e.own.length || (this.xrefMode === 'all' ? e.ob.length : e.ob.some((c) => c[0] === '*'));
+      if (!marked) continue;
+      const vn = this.el.text.querySelector(`.v[data-v="${v}"] .vn`);
+      if (vn) {
+        vn.classList.add('vn-x');
+        vn.title = 'Parallelstellen anzeigen';
+      }
+    }
+  }
+
+  setXrefMode(mode) {
+    this.xrefMode = mode;
+    this.showXrefs = mode !== 'off';
+    this.applyXrefs();
+  }
+
+  async showXrefPop(v, anchor) {
+    const pop = this.el.versePop;
+    const entry = this.xrefs.get(v);
+    if (!entry) return;
+    const here = { book: this.pos.book, chapter: this.pos.chapter, vs: v };
+    const item = (c) => {
+      const r = parseCompact(c);
+      const label = r.toChapter
+        ? `${formatRef({ book: r.book, chapter: r.chapter, vs: r.vs })}–${r.toChapter},${r.toVerse}`
+        : formatRef(r);
+      return `<button class="xref" data-xref="${c}"><b>${esc(label)}</b><span class="xref-text">…</span></button>`;
+    };
+    const own = [...new Set(entry.own)];
+    const ob = [...new Set(entry.ob)].filter((c) => !own.includes(c.replace(/^\*/, '')));
+    const strong = ob.filter((c) => c[0] === '*');
+    const weak = ob.filter((c) => c[0] !== '*');
+    const group = (title, list) => (list.length ? `<div class="xref-group"><small>${title}</small>${list.map(item).join('')}</div>` : '');
+    pop.innerHTML =
+      `<h6>Parallelstellen zu ${esc(formatRef(here))}</h6>` +
+      group(`Aus deiner ${esc(getTranslation(this.trans).short)}`, own) +
+      group('Querverweise', strong) +
+      group(strong.length || own.length ? 'Weitere' : 'Querverweise', weak) +
+      `<p class="xref-credit">Querverweise: OpenBible.info (CC BY)</p>`;
+    pop.classList.add('xref-pop');
+    pop.classList.toggle('hidden', false);
+    const r = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth;
+    const h = pop.offsetHeight;
+    pop.style.left = `${Math.max(10, Math.min(r.left - 10, window.innerWidth - w - 10))}px`;
+    pop.style.top = `${r.bottom + h + 16 > window.innerHeight ? Math.max(10, r.top - h - 8) : r.bottom + 8}px`;
+    // Verstexte nachladen
+    for (const btn of $$('.xref', pop)) {
+      const ref = parseCompact(btn.dataset.xref);
+      getChapter(this.trans, ref.book, ref.chapter)
+        .then((verses) => {
+          const span = btn.querySelector('.xref-text');
+          if (!verses) {
+            span.textContent = '';
+            return;
+          }
+          let t;
+          if (!ref.vs) t = verses.slice(0, 2).join(' ');
+          else {
+            const end = ref.toChapter ? verses.length : ref.ve;
+            t = verses.slice(ref.vs - 1, Math.min(end, ref.vs + 2)).join(' ');
+          }
+          span.textContent = t.length > 230 ? t.slice(0, 228).replace(/\s\S*$/, '') + ' …' : t;
+        })
+        .catch(() => {});
+    }
   }
 
   /** Markierungen und Notiz-Hinweise neu setzen, ohne den Text neu zu laden */
@@ -220,6 +301,13 @@ export class BibleView {
 
     // Tippen auf einen Vers -> Vers auswählen (iPad-freundlich)
     text.addEventListener('click', (e) => {
+      const vnx = e.target.closest('.vn-x');
+      if (vnx) {
+        e.stopPropagation();
+        this.clearSelection();
+        this.showXrefPop(+vnx.closest('.v').dataset.v, vnx);
+        return;
+      }
       const mark = e.target.closest('.note-mark');
       if (mark) {
         e.stopPropagation();
@@ -322,6 +410,14 @@ export class BibleView {
     }, { passive: true });
 
     this.el.versePop.addEventListener('click', (e) => {
+      const x = e.target.closest('button[data-xref]');
+      if (x) {
+        this.el.versePop.classList.add('hidden');
+        const r = parseCompact(x.dataset.xref);
+        this.goto({ book: r.book, chapter: r.chapter, vs: r.vs, ve: r.toChapter ? undefined : r.ve });
+        this.o.onXrefJump?.();
+        return;
+      }
       const b = e.target.closest('button[data-note]');
       if (!b) return;
       this.el.versePop.classList.add('hidden');
@@ -393,6 +489,7 @@ export class BibleView {
   showVersePop(markBtn) {
     const pop = this.el.versePop;
     const list = markBtn._notes || [];
+    pop.classList.toggle('xref-pop', false);
     pop.innerHTML =
       `<h6>Notizen zu dieser Stelle</h6>` +
       list.map((m) => `<button data-note="${m.noteId}">${esc(m.noteTitle || 'Unbenannte Notiz')}<br><small style="color:var(--text-3)">${esc(formatRef({ book: this.pos.book, chapter: this.pos.chapter, vs: m.vs, ve: m.ve }))}</small></button>`).join('');

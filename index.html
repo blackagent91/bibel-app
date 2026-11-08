@@ -285,6 +285,13 @@
               <option value="flow">Fließtext</option>
             </select>
           </label>
+          <label class="row">Querverweise
+            <select id="set-xrefs" class="tool-select">
+              <option value="on">Wichtige markieren (blaue Versnummer)</option>
+              <option value="all">Alle markieren</option>
+              <option value="off">Ausblenden</option>
+            </select>
+          </label>
           <label class="row">Schriftart Bibel
             <select id="set-font" class="tool-select">
               <option value="serif">Serifen (Buchschrift)</option>
@@ -312,7 +319,8 @@
             <input type="file" id="import-backup" accept=".json,application/json" hidden />
           </div>
         </section>
-        <p class="hint" id="app-version" style="text-align:center;margin-top:14px"></p>
+        <p class="hint" style="text-align:center;margin-top:14px">Querverweise: <a href="https://www.openbible.info/labs/cross-references/" target="_blank" rel="noopener" style="color:var(--text-2)">OpenBible.info</a> (CC BY) · PDF-Leser: pdf.js (Mozilla)</p>
+        <p class="hint" id="app-version" style="text-align:center;margin-top:4px"></p>
       </div>
     </div>
   </div>

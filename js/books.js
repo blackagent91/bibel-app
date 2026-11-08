@@ -147,3 +147,69 @@ export function formatRef(r, short = false) {
 export function compareRefs(a, b) {
   return a.book - b.book || a.chapter - b.chapter || (a.vs || 0) - (b.vs || 0);
 }
+
+// ---------------------------------------------------------------------------
+// Querverweise
+// ---------------------------------------------------------------------------
+
+/**
+ * Kompakte Stelle "Buch.Kapitel.Vers[-Vers]" bzw. "Buch.Kapitel.Vers-Kapitel.Vers" oder "Buch.Kapitel"
+ * in ein Stellen-Objekt umwandeln.
+ */
+export function parseCompact(s) {
+  const [start, end] = s.replace(/^\*/, '').split('-');
+  const [book, chapter, vs] = start.split('.').map(Number);
+  const r = { book, chapter };
+  if (vs) {
+    r.vs = vs;
+    r.ve = vs;
+    if (end) {
+      const e = end.split('.').map(Number);
+      if (e.length === 1) r.ve = e[0];
+      else {
+        r.toChapter = e[0];
+        r.toVerse = e[1];
+      }
+    }
+  }
+  return r;
+}
+
+/**
+ * Liest Stellenlisten wie „Hebr 4,12-13; 10,38-39; 1Pt 2,6-9“, „Ps 104,5.14-17“ oder „1Mo 10 u. 11“.
+ * @returns {string[]} kompakte Stellen ("43.15.18-19")
+ */
+export function parseRefList(text) {
+  const out = [];
+  let book = null;
+  for (let part of text.split(';')) {
+    part = part.trim().replace(/\.$/, '');
+    if (!part) continue;
+    const m = part.match(/^((?:\d\s?\.?\s?)?[A-Za-zÄÖÜäöüß]+\.?)\s*(.*)$/);
+    let rest = part;
+    if (m && /[A-Za-zÄÖÜäöü]/.test(m[1]) && !/^(u|f|ff)\.?$/.test(m[1])) {
+      const b = findBook(m[1]);
+      if (!b) continue;
+      book = b.id;
+      rest = m[2];
+    }
+    if (!book) continue;
+    let lastChapter = null;
+    for (const piece of rest.split(/\s*u\.\s*/)) {
+      const p = piece.replace(/f+\.?$/, '').trim();
+      if (!p) continue;
+      const cm = p.match(/^(\d+)\s*,\s*(.+)$/);
+      if (cm) {
+        lastChapter = +cm[1];
+        for (const seg of cm[2].split('.')) {
+          const vm = seg.trim().match(/^(\d+)[a-z]?(?:\s*[-–]\s*(\d+))?/);
+          if (vm) out.push(`${book}.${lastChapter}.${vm[1]}${vm[2] ? '-' + vm[2] : ''}`);
+        }
+      } else {
+        const ch = p.match(/^(\d+)/);
+        if (ch) out.push(`${book}.${ch[1]}`);
+      }
+    }
+  }
+  return out;
+}

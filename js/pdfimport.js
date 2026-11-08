@@ -2,7 +2,7 @@
 // Erkennt Buchtitel (große Schrift), Kapitelanfänge (große Zahl / „Psalm N“),
 // Versnummern, und überspringt Kopfzeilen, Zwischenüberschriften, Parallelstellen und Fußnoten.
 // Die Datei verlässt das Gerät nicht.
-import { BOOKS } from './books.js';
+import { BOOKS, parseRefList } from './books.js';
 
 let pdfjsPromise = null;
 function loadPdfJs() {
@@ -137,6 +137,8 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
   try { meta = (await pdf.getMetadata())?.info || {}; } catch {}
 
   const books = [];
+  const xrefs = {}; // "Buch:Kapitel:Vers" -> ["43.15.18-19", …] (Stellen unter den Zwischenüberschriften)
+  let pendingRefs = [];
   const notes = { unmatched: [], skipped: [], fallbacks: [] }; // für den Prüfbericht
   let pageNo = 0;
   const st = {
@@ -156,10 +158,17 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     const c = (b[st.chapter - 1] ||= []);
     c[st.verse - 1] = c[st.verse - 1] ? c[st.verse - 1] + ' ' + t : t;
   };
+  const attachRefs = () => {
+    if (!pendingRefs.length || !st.book || !st.chapter || st.verse < 1) return;
+    const key = `${st.book}:${st.chapter}:${st.verse}`;
+    xrefs[key] = [...new Set([...(xrefs[key] || []), ...pendingRefs])];
+    pendingRefs = [];
+  };
   const setVerse = (v) => {
     flush();
     st.verse = v;
     st.buf = '';
+    attachRefs();
   };
   const append = (text) => {
     if (!st.book || !st.chapter || st.verse < 1 || !text) return;
@@ -179,6 +188,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     st.buf = '';
     st.inHeading = false;
     st.suspended = false;
+    pendingRefs = [];
   };
   const startChapter = (n, firstVerse = 1) => {
     if (st.provisional) st.buf = ''; // Text vor dem ersten Kapitelanfang verwerfen
@@ -189,6 +199,7 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     st.provisional = false;
     st.inHeading = false;
     st.suspended = false;
+    attachRefs();
   };
 
   for (let pn = 1; pn <= pdf.numPages; pn++) {
@@ -218,7 +229,8 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     }
     out.push(b);
   }
-  return { name: guessName(meta, file.name), books: out, report: { ...buildReport(out), ...notes } };
+  const xrefCount = Object.values(xrefs).reduce((n, l) => n + l.length, 0);
+  return { name: guessName(meta, file.name), books: out, xrefs, report: { ...buildReport(out), ...notes, xrefs: xrefCount } };
 
   // -------------------------------------------------------------------------
   function processPage(rawItems, pageWidth) {
@@ -361,7 +373,11 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
     if (!chars) return;
     // Zeile überwiegend kleine Schrift -> Fußnoten / Parallelstellen
     const smallChars = items.filter((i) => i.size < body * 0.88).reduce((n, i) => n + i.s.trim().length, 0);
-    if (smallChars / chars > 0.6) return;
+    if (smallChars / chars > 0.6) {
+      const t = joinText(items);
+      if (REF_LIST.test(t)) pendingRefs.push(...parseRefList(t));
+      return;
+    }
 
     // Segmente bauen (hochgestellte Fußnotenzeichen weglassen)
     const segs = [];
@@ -403,7 +419,9 @@ export async function parseBiblePdf(file, onProgress = () => {}, signal = {}) {
       return;
     }
     if (REF_LIST.test(text)) {
-      // Parallelstellen („2Kor 1,1-2; Kol 1,3“) – nie Verstext, und ihre Zahlen sind keine Versnummern
+      // Parallelstellen („2Kor 1,1-2; Kol 1,3“) – nie Verstext, und ihre Zahlen sind keine Versnummern.
+      // Sie werden als Querverweise für den folgenden Vers gemerkt.
+      pendingRefs.push(...parseRefList(text));
       st.inHeading = false;
       return;
     }

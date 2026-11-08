@@ -95,12 +95,47 @@ export async function importBibleFile(file, { onProgress, signal, name: customNa
     short: makeShort(name),
     note: `Importiert aus ${file.name}`,
     books: parsed.books,
+    xrefs: parsed.xrefs || null,
   };
   await db.put('bibles', entry);
   imported.push(entry);
   let verses = 0;
   for (const b of parsed.books) if (b) for (const c of b) if (c) verses += c.filter(Boolean).length;
   return { id: entry.id, name, verses, report: parsed.report };
+}
+
+// ---------------------------------------------------------------------------
+// Querverweise: eigene (aus der importierten Bibel) + OpenBible.info (für alle Übersetzungen)
+// ---------------------------------------------------------------------------
+const xrefCache = new Map();
+
+/** @returns {Promise<Map<number, {own:string[], ob:string[]}>>} Vers -> Verweise */
+export async function getXrefs(transId, bookId, chapter) {
+  const res = new Map();
+  const add = (v, kind, list) => {
+    if (!list?.length) return;
+    const e = res.get(v) || { own: [], ob: [] };
+    e[kind].push(...list);
+    res.set(v, e);
+  };
+  const t = imported.find((x) => x.id === transId);
+  if (t?.xrefs) {
+    const prefix = `${bookId}:${chapter}:`;
+    for (const [k, list] of Object.entries(t.xrefs)) if (k.startsWith(prefix)) add(+k.slice(prefix.length), 'own', list);
+  }
+  let ob = xrefCache.get(bookId);
+  if (!ob) {
+    try {
+      const r = await fetch(`data/xref/${String(bookId).padStart(2, '0')}.json`);
+      ob = r.ok ? await r.json() : {};
+    } catch {
+      ob = {};
+    }
+    xrefCache.set(bookId, ob);
+  }
+  const prefix = `${chapter}:`;
+  for (const [k, list] of Object.entries(ob)) if (k.startsWith(prefix)) add(+k.slice(prefix.length), 'ob', list);
+  return res;
 }
 
 /** Kapitelanzahl eines Buches in einer Übersetzung (Traditionen unterscheiden sich, z. B. Joel 3/4) */
