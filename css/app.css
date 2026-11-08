@@ -282,6 +282,9 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; touch-action: none; }
 .note-body.drawing .ink { pointer-events: auto; cursor: crosshair; }
 .ink.ink-live, .note-body.drawing .ink.ink-live { pointer-events: none; }
+/* Textmarker-Ebene: deckend gemalt, die ganze Ebene einheitlich durchsichtig –
+   so dunkeln sich überlappende Marker-Striche nicht gegenseitig ab */
+.ink.ink-marker, .note-body.drawing .ink.ink-marker { pointer-events: none; opacity: .38; }
 .note-body.drawing .editor { caret-color: transparent; }
 /* Stift-Modus: Handballen darf keine Textauswahl / kein Kopieren-Menü auslösen */
 .note-body.drawing, .note-body.drawing * {

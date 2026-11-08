@@ -762,6 +762,8 @@ class Ink {
     this.ctx = this.canvas.getContext('2d');
     this.live = $('#ink-live');
     this.lctx = this.live.getContext('2d');
+    this.mcanvas = $('#ink-marker'); // Textmarker liegen unter der Stiftschrift
+    this.mctx = this.mcanvas.getContext('2d');
     this.strokes = [];
     this.undoStack = [];
     this.tool = 'pen';
@@ -992,7 +994,13 @@ class Ink {
       }
       // Strich in die fertige Zeichnung übernehmen – ohne alles neu zu malen
       this.strokes.push(cur.s);
-      if (this.raf) {
+      if (cur.s.t === 'marker') {
+        // restliche Stücke des Markers fertig malen (die letzten Punkte kamen evtl. nach dem letzten Bild)
+        if (!this.raf) {
+          this.prepare(this.mctx);
+          this.drawStroke(this.mctx, cur.s, cur.drawn);
+        }
+      } else if (this.raf) {
         // ein vollständiges Neuzeichnen steht ohnehin an
       } else {
         this.prepare(this.ctx);
@@ -1091,7 +1099,7 @@ class Ink {
   resize() {
     const r = this.ed.el.body.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    for (const cv of [this.canvas, this.live]) {
+    for (const cv of [this.canvas, this.live, this.mcanvas]) {
       cv.width = Math.round(r.width * dpr);
       cv.height = Math.round(r.height * dpr);
     }
@@ -1122,16 +1130,26 @@ class Ink {
 
   draw() {
     const ctx = this.ctx;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    const mctx = this.mctx;
+    for (const [c, cv] of [[ctx, this.canvas], [mctx, this.mcanvas]]) {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, cv.width, cv.height);
+    }
     const g = this.prepare(ctx);
+    this.prepare(mctx);
     const minY = -g.oy - 50;
     const maxY = -g.oy + g.h + 50;
     for (const s of this.strokes) {
       let box = BOXES.get(s);
       if (!box) BOXES.set(s, (box = bbox(s.p)));
       if (box[3] < minY || box[1] > maxY) continue; // nur sichtbare Striche zeichnen
-      this.drawStroke(ctx, s);
+      this.drawStroke(s.t === 'marker' ? mctx : ctx, s);
+    }
+    // Marker, der gerade gemalt wird, gehört mit auf die Marker-Ebene
+    const cur = this.current;
+    if (cur?.s?.t === 'marker') {
+      this.drawStroke(mctx, cur.s);
+      cur.drawn = cur.s.p.length;
     }
     // Lösch-Animation (ausblenden + leicht schrumpfen)
     if (this.fading) {
@@ -1140,9 +1158,10 @@ class Ink {
         this.fading = null;
       } else {
         for (const s of this.fading.strokes) {
-          ctx.globalAlpha = 1 - t;
-          this.drawStroke(ctx, { ...s, c: t < 0.35 ? '#ff6b6b' : s.c, w: s.w * (1 - t * 0.6) });
-          ctx.globalAlpha = 1;
+          const c = s.t === 'marker' ? mctx : ctx;
+          c.globalAlpha = 1 - t;
+          this.drawStroke(c, { ...s, c: t < 0.35 ? '#ff6b6b' : s.c, w: s.w * (1 - t * 0.6) });
+          c.globalAlpha = 1;
         }
         this.schedule();
       }
@@ -1169,8 +1188,11 @@ class Ink {
     if (!cur || !cur.s) return;
     const ctx = this.lctx;
     const s = cur.s;
-    if (s.t === 'marker' || cur.drawn === 0) {
-      // Textmarker (halbtransparent) immer komplett, sonst würden Überlappungen dunkler
+    if (s.t === 'marker') {
+      // Marker deckend auf seine eigene Ebene – die Ebene selbst ist durchsichtig
+      this.prepare(this.mctx);
+      this.drawStroke(this.mctx, s, cur.drawn);
+    } else if (cur.drawn === 0) {
       this.clearLive();
       this.prepare(ctx);
       this.drawStroke(ctx, s);
@@ -1188,17 +1210,16 @@ class Ink {
   drawStroke(ctx, s, from = 0) {
     const p = s.p;
     if (s.t === 'marker') {
-      ctx.globalAlpha = 0.35;
       ctx.strokeStyle = s.c;
       ctx.lineWidth = s.w * 5;
-      ctx.lineCap = 'butt';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const start = Math.max(0, from - 3);
       ctx.beginPath();
-      ctx.moveTo(p[0], p[1]);
-      for (let i = 3; i < p.length; i += 3) ctx.lineTo(p[i], p[i + 1]);
+      ctx.moveTo(p[start], p[start + 1]);
+      for (let i = start + 3; i < p.length; i += 3) ctx.lineTo(p[i], p[i + 1]);
       if (p.length === 3) ctx.lineTo(p[0] + 0.1, p[1]);
       ctx.stroke();
-      ctx.globalAlpha = 1;
-      ctx.lineCap = 'round';
       return;
     }
     ctx.strokeStyle = s.c;
