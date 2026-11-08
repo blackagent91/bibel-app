@@ -1,5 +1,5 @@
 // Offline-Unterstützung: App-Dateien und Bibeltexte werden zwischengespeichert.
-const VERSION = 'bibelstudium-v13';
+const VERSION = 'bibelstudium-v15';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg',
   'js/app.js', 'js/bible.js', 'js/books.js', 'js/db.js', 'js/notes.js', 'js/translations.js', 'js/util.js', 'js/pdfimport.js',
@@ -34,8 +34,9 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   // App-Dateien: Netzwerk zuerst, offline aus dem Cache
+  // immer beim Server nachfragen (sonst liefert der Browser-Cache bis zu 10 Minuten alte Dateien)
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request.mode === 'navigate' ? e.request : new Request(e.request, { cache: 'no-cache' }))
       .then((res) => {
         if (res.ok) caches.open(VERSION).then((c) => c.put(e.request, res.clone()));
         return res;

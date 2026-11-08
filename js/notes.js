@@ -58,7 +58,8 @@ export class NotesEditor {
       dropHint: $('#drop-hint'),
       saveState: $('#save-state'),
     };
-    this.save = debounce(() => this.commit(), 500);
+    this.save = debounce((flushed) => this.commit(flushed === true), 500);
+    this.saveInk = debounce((flushed) => this.commit(flushed === true), 1500);
     this.hist = [''];
     this.hIdx = 0;
     this.recordSoon = debounce(() => this.record(), 600);
@@ -115,11 +116,14 @@ export class NotesEditor {
     if (this.note && this.note.id !== note?.id) this.save.flush();
     this.note = note;
     this.dirty = false;
+    this.dirtyText = false;
+    this.dirtyInk = false;
+    this.saveInk.cancel();
     this.el.title.value = note?.title || '';
     this.el.editor.innerHTML = note?.html || '';
     this.hist = [this.el.editor.innerHTML];
     this.hIdx = 0;
-    this.ink.setStrokes(note?.strokes || []);
+    this.ink.setStrokes(note ? unpackStrokes(note) : []);
     this.renderMeta();
     this.hideHandle();
     this.el.scroll.scrollTop = 0;
@@ -140,31 +144,56 @@ export class NotesEditor {
       .filter(Boolean);
   }
 
-  commit() {
+  /**
+   * Speichern. Während mit dem Stift geschrieben wird, wird nicht gespeichert (das würde
+   * kurz ruckeln) – erst wenn der Stift ruht. `flushed` = sofort speichern (Notizwechsel, App schließen).
+   */
+  commit(flushed = false) {
     if (!this.note || !this.dirty) return; // nur speichern, wenn sich wirklich etwas geändert hat
+    if (!flushed && (this.ink.current || this.ink.penActive())) {
+      this.save(); // später nochmal versuchen
+      return;
+    }
     this.dirty = false;
     const n = this.note;
-    n.title = this.el.title.value.trim();
-    n.html = this.el.editor.innerHTML;
-    const clone = this.el.editor.cloneNode(true);
-    clone.querySelectorAll('.scripture').forEach((b) => b.replaceWith(' '));
-    clone.querySelectorAll('p, div, li, h1, h2, h3, blockquote').forEach((b) => b.append(' '));
-    n.text = clone.textContent.replace(/\s+/g, ' ').trim().slice(0, 400);
-    n.refs = this.extractRefs();
-    n.strokes = this.ink.strokes;
+    if (this.dirtyText || n.html == null) {
+      n.title = this.el.title.value.trim();
+      n.html = this.el.editor.innerHTML;
+      const clone = this.el.editor.cloneNode(true);
+      clone.querySelectorAll('.scripture').forEach((b) => b.replaceWith(' '));
+      clone.querySelectorAll('p, div, li, h1, h2, h3, blockquote').forEach((b) => b.append(' '));
+      n.text = clone.textContent.replace(/\s+/g, ' ').trim().slice(0, 400);
+      n.refs = this.extractRefs();
+    }
+    if (this.dirtyInk || !n.ink) {
+      // Zeichnung als ein Datenblock statt hunderttausender Einzelzahlen (viel schneller zu speichern)
+      n.ink = packStrokes(this.ink.strokes);
+      delete n.strokes;
+    }
+    this.dirtyText = false;
+    this.dirtyInk = false;
     n.updated = Date.now();
     // Tage, an denen an dieser Notiz gearbeitet wurde (für „Nach Tag filtern“)
     n.days = [...new Set([...(n.days || [dayKey(n.created)]), dayKey(n.updated)])];
     this.onSave(n);
     this.renderMeta();
-    this.el.saveState.textContent = 'Gespeichert';
-    clearTimeout(this._st);
-    this._st = setTimeout(() => (this.el.saveState.textContent = ''), 1500);
+    if (this.mode === 'text') {
+      this.el.saveState.textContent = 'Gespeichert';
+      clearTimeout(this._st);
+      this._st = setTimeout(() => (this.el.saveState.textContent = ''), 1500);
+    }
   }
 
-  changed() {
+  /** @param {'text'|'ink'} kind was sich geändert hat */
+  changed(kind = 'text') {
     this.dirty = true;
-    this.el.saveState.textContent = '…';
+    if (kind === 'ink') {
+      this.dirtyInk = true;
+      this.saveInk(); // länger warten – beim Schreiben gibt es ständig kurze Pausen
+      return;
+    }
+    this.dirtyText = true;
+    if (this.el.saveState.textContent !== '…') this.el.saveState.textContent = '…';
     this.save();
   }
 
@@ -706,6 +735,7 @@ export class NotesEditor {
 
   // ------------------------------------------------------------------ Modus
   setMode(mode) {
+    if (this.mode === 'draw' && mode !== 'draw') this.save.flush(true);
     this.mode = mode;
     $$('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
     $('#text-tools').classList.toggle('hidden', mode !== 'text');
@@ -812,7 +842,7 @@ class Ink {
   }
   changed() {
     this.schedule();
-    this.ed.changed();
+    this.ed.changed('ink');
   }
 
   /** Lage der Notizseite einmal messen (statt bei jedem Stiftpunkt) */
@@ -949,7 +979,7 @@ class Ink {
       }
       if (cur.eraser) {
         if (this.undoStack.length && this.undoStack[this.undoStack.length - 1].length === this.strokes.length) this.undoStack.pop();
-        else this.ed.changed();
+        else this.ed.changed('ink');
         return;
       }
       cancelAnimationFrame(this.liveRaf);
@@ -968,7 +998,7 @@ class Ink {
         this.prepare(this.ctx);
         this.drawStroke(this.ctx, cur.s);
       }
-      this.ed.changed();
+      this.ed.changed('ink');
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
@@ -1219,6 +1249,36 @@ function bbox(p) {
     if (p[i + 1] > d) d = p[i + 1];
   }
   return [a, b, c, d];
+}
+
+/** Striche als ein Datenblock: {meta: [[Werkzeug, Farbe, Breite, Länge] …], data: Float32Array} */
+export function packStrokes(strokes) {
+  let total = 0;
+  for (const s of strokes) total += s.p.length;
+  const data = new Float32Array(total);
+  const meta = [];
+  let o = 0;
+  for (const s of strokes) {
+    data.set(s.p, o);
+    meta.push([s.t, s.c, s.w, s.p.length]);
+    o += s.p.length;
+  }
+  return { meta, data };
+}
+
+/** Striche einer Notiz lesen (kompaktes oder altes Format) */
+export function unpackStrokes(note) {
+  if (note.ink?.meta) {
+    const { meta, data } = note.ink;
+    const arr = data instanceof Float32Array ? data : Float32Array.from(data || []);
+    let o = 0;
+    return meta.map(([t, c, w, len]) => {
+      const p = Array.from(arr.subarray(o, o + len), (v) => Math.round(v * 100) / 100);
+      o += len;
+      return { t, c, w, p };
+    });
+  }
+  return note.strokes || [];
 }
 
 const r1 = (n) => Math.round(n * 10) / 10;

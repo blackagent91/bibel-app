@@ -21,7 +21,7 @@ export function debounce(fn, ms) {
   };
   d.flush = (...args) => {
     clearTimeout(t);
-    fn(...args);
+    fn(...(args.length ? args : [true]));
   };
   d.cancel = () => clearTimeout(t);
   return d;

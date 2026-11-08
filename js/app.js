@@ -3,7 +3,7 @@ import { db, uid } from './db.js';
 import { BOOKS, getBook, formatRef, compareRefs } from './books.js';
 import { loadImported, listTranslations, getTranslation, importBibleFile, deleteImported } from './translations.js';
 import { BibleView } from './bible.js';
-import { NotesEditor } from './notes.js';
+import { NotesEditor, unpackStrokes } from './notes.js';
 import { $, $$, esc, toast, formatDate, dayKey, dayLabel } from './util.js';
 
 // ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '13 · 08.11.2026';
+export const APP_VERSION = '15 · 08.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -43,7 +43,7 @@ function writeLS(key, value) {
 }
 const saveSettings = () => writeLS('settings', settings);
 
-const isEmpty = (n) => !n.title && !n.text && !(n.strokes && n.strokes.length) && !(n.refs && n.refs.length);
+const isEmpty = (n) => !n.title && !n.text && !(n.ink?.meta?.length || n.strokes?.length) && !(n.refs && n.refs.length);
 
 function newNote(title = '') {
   const now = Date.now();
@@ -632,7 +632,7 @@ function bindSettings() {
       app: 'bibelstudium',
       version: 1,
       exported: new Date().toISOString(),
-      notes: [...state.notes.values()],
+      notes: [...state.notes.values()].map(({ ink, ...n }) => ({ ...n, strokes: unpackStrokes({ ink, strokes: n.strokes }) })),
       marks: state.marks,
       settings,
     };
@@ -723,7 +723,10 @@ async function init() {
   });
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker
+      .register('sw.js', { updateViaCache: 'none' })
+      .then((reg) => reg.update())
+      .catch(() => {});
   }
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 }
