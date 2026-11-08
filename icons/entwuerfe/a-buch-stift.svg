@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#000"/>
+  <!-- offenes Buch -->
+  <path d="M256 168c-38-24-88-32-136-26v214c48-6 98 2 136 26 38-24 88-32 136-26V142c-48-6-98 2-136 26z" fill="none" stroke="#f2f2f2" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M256 168v214" stroke="#f2f2f2" stroke-width="16"/>
+  <!-- Textzeilen links -->
+  <path d="M152 196c28-2 54 2 76 12M152 236c28-2 54 2 76 12M152 276c28-2 54 2 76 12" stroke="#5a5a62" stroke-width="10" stroke-linecap="round" fill="none"/>
+  <!-- Stift -->
+  <g transform="rotate(38 330 250)">
+    <rect x="312" y="120" width="36" height="190" rx="6" fill="#e8c26e"/>
+    <path d="M312 310h36l-18 42z" fill="#f2e3bd"/>
+    <path d="M324 338l6 14 6-14z" fill="#1a1408"/>
+    <rect x="312" y="120" width="36" height="22" rx="6" fill="#c9a24f"/>
+  </g>
+</svg>

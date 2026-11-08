@@ -22,6 +22,9 @@ const BLOCK_COLORS = [
 const PEN_COLORS = ['#f2f2f2', '#e8c26e', '#6cd28c', '#6eaaff', '#ff78b4', '#aa82ff', '#ff6b6b', '#8a8a92'];
 const PEN_WIDTHS = [1.5, 2.5, 4, 7];
 const PALM_GRACE_MS = 900; // so lange nach dem Stift werden Berührungen der Hand ignoriert
+const MIN_VERTICAL_REVERSALS = 6; // ab 3 Bögen (Ab-Auf-Ab-Auf…) gilt Hoch-runter-Kritzeln als Löschen
+const MIN_HORIZONTAL_REVERSALS = 3;
+const FADE_MS = 380;
 const PALM_SIZE = 40; // Kontaktfläche (px), ab der eine Berührung als Handballen gilt
 
 /** HTML eines Bibelstellen-Blocks */
@@ -981,7 +984,12 @@ class Ink {
       }
       return count;
     };
-    if (Math.max(reversals(0, w), reversals(1, h)) < 3) return false;
+    // Hoch-runter-Kritzelei braucht mindestens 3 Bögen nach dem ersten Abstrich
+    // (ein handgeschriebenes „m“ hat nur 2 und bleibt deshalb stehen).
+    // Seitliches Hin-und-her braucht mindestens 3 Richtungswechsel.
+    const vertical = reversals(1, h) >= MIN_VERTICAL_REVERSALS;
+    const horizontal = reversals(0, w) >= MIN_HORIZONTAL_REVERSALS;
+    if (!vertical && !horizontal) return false;
 
     // Welche vorhandenen Striche liegen unter der Kritzelei?
     const pad = 6;
@@ -995,6 +1003,8 @@ class Ink {
     }
     if (!targets.size) return false; // nichts darunter -> normaler Strich
     this.strokes = this.strokes.filter((o) => o !== s && !targets.has(o));
+    // kurze Lösch-Animation: Striche blenden aus
+    this.fading = { strokes: [...targets, s], start: performance.now() };
     return true;
   }
 
@@ -1046,6 +1056,23 @@ class Ink {
       for (let i = 1; i < p.length; i += 30) if (p[i] > minY && p[i] < maxY) { visible = true; break; }
       if (!visible && !(p[p.length - 2] > minY && p[p.length - 2] < maxY)) continue;
       this.drawStroke(ctx, s);
+    }
+    // Lösch-Animation (ausblenden + leicht schrumpfen)
+    if (this.fading) {
+      const t = (performance.now() - this.fading.start) / FADE_MS;
+      if (t >= 1) {
+        this.fading = null;
+      } else {
+        ctx.save();
+        for (const s of this.fading.strokes) {
+          ctx.globalAlpha = 1 - t;
+          const fadeStroke = { ...s, c: t < 0.35 ? '#ff6b6b' : s.c, w: s.w * (1 - t * 0.6) };
+          this.drawStroke(ctx, fadeStroke);
+          ctx.globalAlpha = 1;
+        }
+        ctx.restore();
+        this.schedule();
+      }
     }
   }
 
