@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Bibelstudium" />
+  <title>Bibelstudium</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- ============ LINKS: NOTIZEN ============ -->
+    <section id="notes-pane" class="pane notes-pane" aria-label="Notizen">
+      <header class="pane-head">
+        <div class="head-row">
+          <button class="icon-btn" id="btn-index" title="Notizverzeichnis" aria-label="Notizverzeichnis">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          </button>
+          <div class="mode-switch" role="tablist">
+            <button class="mode-btn active" data-mode="text" title="Text schreiben">
+              <svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg><span>Text</span>
+            </button>
+            <button class="mode-btn" data-mode="draw" title="Mit Stift zeichnen/schreiben">
+              <svg viewBox="0 0 24 24"><path d="M15 4l5 5L9 20H4v-5L15 4z"/></svg><span>Stift</span>
+            </button>
+          </div>
+          <span class="spacer"></span>
+          <span class="save-state" id="save-state"></span>
+          <button class="icon-btn" id="btn-new-note" title="Neue Notiz" aria-label="Neue Notiz">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button class="icon-btn" id="btn-settings" title="Einstellungen" aria-label="Einstellungen">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          </button>
+        </div>
+
+        <!-- Text-Werkzeuge -->
+        <div class="toolbar" id="text-tools">
+          <select id="fmt-block" class="tool-select" title="Absatzformat">
+            <option value="h1">Titel</option>
+            <option value="h2">Überschrift</option>
+            <option value="h3">Zwischenüberschrift</option>
+            <option value="p" selected>Text</option>
+            <option value="small">Klein</option>
+          </select>
+          <button class="tool" data-cmd="smaller" title="Schrift kleiner">A−</button>
+          <button class="tool" data-cmd="bigger" title="Schrift größer">A+</button>
+          <i class="sep"></i>
+          <button class="tool" data-cmd="bold" title="Fett"><b>B</b></button>
+          <button class="tool" data-cmd="italic" title="Kursiv"><i>I</i></button>
+          <button class="tool" data-cmd="underline" title="Unterstrichen"><u>U</u></button>
+          <button class="tool" data-cmd="strikeThrough" title="Durchgestrichen"><s>S</s></button>
+          <i class="sep"></i>
+          <div class="tool-pop">
+            <button class="tool" data-pop="hilite" title="Text markieren">
+              <svg viewBox="0 0 24 24"><path d="M9 11l-5 5v4h4l5-5M14 6l4 4-6 6-4-4 6-6zM16 4l4 4"/></svg>
+            </button>
+            <div class="popover swatches" data-for="hilite"></div>
+          </div>
+          <div class="tool-pop">
+            <button class="tool" data-pop="color" title="Schriftfarbe"><span class="a-color">A</span></button>
+            <div class="popover swatches" data-for="color"></div>
+          </div>
+          <i class="sep"></i>
+          <button class="tool" data-cmd="insertUnorderedList" title="Aufzählung">
+            <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
+          </button>
+          <button class="tool" data-cmd="insertOrderedList" title="Nummerierung">
+            <svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 4.5h1.5V9M4 9h3M4 14.5c.5-.7 2.8-.9 2.8.6 0 1.2-2.8 2-2.8 3.4h3"/></svg>
+          </button>
+          <button class="tool" data-cmd="checklist" title="Checkliste">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="6" rx="1"/><path d="M4.5 7l1 1 2-2M12 7h9M3 14h6v6H3zM12 17h9"/></svg>
+          </button>
+          <button class="tool" data-cmd="quote" title="Zitat">
+            <svg viewBox="0 0 24 24"><path d="M7 7h4v4c0 3-2 5-4 6M15 7h4v4c0 3-2 5-4 6"/></svg>
+          </button>
+          <div class="tool-pop">
+            <button class="tool" data-pop="block" title="Block einfügen">
+              <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10h10M7 14h6"/></svg>
+            </button>
+            <div class="popover block-pop" data-for="block"></div>
+          </div>
+          <button class="tool" data-cmd="hr" title="Trennlinie">
+            <svg viewBox="0 0 24 24"><path d="M3 12h18"/></svg>
+          </button>
+          <i class="sep"></i>
+          <button class="tool" data-cmd="undo" title="Rückgängig">
+            <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
+          </button>
+          <button class="tool" data-cmd="redo" title="Wiederholen">
+            <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3"/></svg>
+          </button>
+        </div>
+
+        <!-- Stift-Werkzeuge -->
+        <div class="toolbar hidden" id="draw-tools">
+          <button class="tool active" data-pen="pen" title="Stift">
+            <svg viewBox="0 0 24 24"><path d="M15 4l5 5L9 20H4v-5L15 4z"/></svg>
+          </button>
+          <button class="tool" data-pen="marker" title="Textmarker">
+            <svg viewBox="0 0 24 24"><path d="M9 11l-5 5v4h4l5-5M14 6l4 4-6 6-4-4 6-6z"/></svg>
+          </button>
+          <button class="tool" data-pen="eraser" title="Radierer">
+            <svg viewBox="0 0 24 24"><path d="M7 20h13M4.5 13.5l8-8a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L11 19H8l-3.5-3.5a1.4 1.4 0 0 1 0-2z"/></svg>
+          </button>
+          <i class="sep"></i>
+          <div class="pen-colors" id="pen-colors"></div>
+          <i class="sep"></i>
+          <div class="pen-widths" id="pen-widths"></div>
+          <i class="sep"></i>
+          <button class="tool toggle" id="pencil-only" title="Nur Apple Pencil zeichnet – Finger scrollt">
+            <svg viewBox="0 0 24 24"><path d="M15 4l5 5L9 20H4v-5L15 4z"/></svg><span>Nur Pencil</span>
+          </button>
+          <button class="tool" id="draw-undo" title="Letzten Strich rückgängig">
+            <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
+          </button>
+          <button class="tool" id="draw-clear" title="Zeichnung löschen">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="note-body" id="note-body">
+        <div class="note-scroll" id="note-scroll">
+          <div class="note-page" id="note-page">
+            <input id="note-title" class="note-title" placeholder="Titel der Notiz" autocomplete="off" />
+            <div class="note-meta" id="note-meta"></div>
+            <div id="editor" class="editor" contenteditable="true" spellcheck="true"
+                 data-placeholder="Schreib los … oder markiere rechts eine Bibelstelle und zieh sie hierher."></div>
+            <div class="drop-hint" id="drop-hint">Hier ablegen</div>
+          </div>
+        </div>
+        <canvas id="ink" class="ink"></canvas>
+        <div class="block-handle hidden" id="block-handle">
+          <button data-act="up" title="Nach oben">↑</button>
+          <button data-act="down" title="Nach unten">↓</button>
+          <button data-act="color" title="Farbe ändern" class="bh-color">●</button>
+          <button data-act="dup" title="Duplizieren">⧉</button>
+          <button data-act="del" title="Löschen">✕</button>
+        </div>
+      </div>
+
+      <!-- Notizverzeichnis -->
+      <aside class="drawer" id="drawer" aria-hidden="true">
+        <div class="drawer-head">
+          <div class="tabs">
+            <button class="tab active" data-tab="notes">Notizen</button>
+            <button class="tab" data-tab="refs">Bibelstellen</button>
+          </div>
+          <button class="icon-btn" id="drawer-close" aria-label="Schließen">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <div class="drawer-search">
+          <input id="drawer-search" type="search" placeholder="Notizen durchsuchen …" autocomplete="off" />
+        </div>
+        <div class="drawer-list" id="drawer-list"></div>
+        <div class="drawer-foot">
+          <button class="btn primary" id="drawer-new">+ Neue Notiz</button>
+        </div>
+      </aside>
+      <div class="drawer-scrim" id="drawer-scrim"></div>
+    </section>
+
+    <!-- ============ TRENNER ============ -->
+    <div class="divider" id="divider" role="separator" aria-orientation="vertical" title="Ziehen zum Anpassen">
+      <span></span>
+    </div>
+
+    <!-- ============ RECHTS: BIBEL ============ -->
+    <section id="bible-pane" class="pane bible-pane" aria-label="Bibel">
+      <header class="pane-head">
+        <div class="head-row">
+          <button class="icon-btn" id="nav-back" title="Zurück" aria-label="Zurück">
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <button class="icon-btn" id="nav-fwd" title="Vorwärts" aria-label="Vorwärts">
+            <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+          <button class="ref-btn" id="ref-btn" title="Inhaltsverzeichnis öffnen">
+            <span id="ref-label">1. Mose 1</span>
+            <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <span class="spacer"></span>
+          <select id="translation" class="tool-select trans-select" title="Übersetzung"></select>
+          <button class="icon-btn" id="btn-search" title="In der Bibel suchen" aria-label="Suchen">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="bible-scroll" id="bible-scroll">
+        <article class="bible-text" id="bible-text"></article>
+        <nav class="chapter-nav">
+          <button class="btn ghost" id="ch-prev">‹ Vorheriges Kapitel</button>
+          <button class="btn ghost" id="ch-next">Nächstes Kapitel ›</button>
+        </nav>
+      </div>
+
+      <!-- Inhaltsverzeichnis -->
+      <div class="overlay" id="toc" aria-hidden="true">
+        <div class="overlay-head">
+          <input id="toc-input" class="toc-input" placeholder="Springe zu … z. B. „1Mo 5“ oder „Joh 3,16“" autocomplete="off" />
+          <button class="icon-btn" id="toc-close" aria-label="Schließen">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <div class="toc-body" id="toc-body"></div>
+      </div>
+
+      <!-- Suche -->
+      <div class="overlay" id="search" aria-hidden="true">
+        <div class="overlay-head">
+          <input id="search-input" class="toc-input" type="search" placeholder="Wort oder Satz suchen …" autocomplete="off" />
+          <button class="icon-btn" id="search-close" aria-label="Schließen">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <div class="search-filter" id="search-filter">
+          <button class="chip active" data-scope="all">Ganze Bibel</button>
+          <button class="chip" data-scope="AT">AT</button>
+          <button class="chip" data-scope="NT">NT</button>
+          <button class="chip" data-scope="book">Aktuelles Buch</button>
+        </div>
+        <div class="search-results" id="search-results"></div>
+      </div>
+    </section>
+
+    <!-- Mobile Umschalter -->
+    <nav class="mobile-tabs" id="mobile-tabs">
+      <button data-show="notes" class="active">Notizen</button>
+      <button data-show="bible">Bibel</button>
+    </nav>
+  </div>
+
+  <!-- Auswahl-Menü für Bibelstellen -->
+  <div class="sel-menu hidden" id="sel-menu">
+    <div class="sel-ref" id="sel-ref"></div>
+    <div class="sel-actions">
+      <button class="sel-btn primary" data-act="new">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Notiz erstellen
+      </button>
+      <button class="sel-btn" data-act="add">
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>In offene Notiz
+      </button>
+      <button class="sel-btn drag" data-act="drag" title="Gedrückt halten und auf das Notizfeld ziehen">
+        <svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>Ziehen
+      </button>
+    </div>
+    <div class="sel-colors" id="sel-colors"></div>
+  </div>
+
+  <!-- Notiz-Liste an einem Vers -->
+  <div class="verse-pop hidden" id="verse-pop"></div>
+
+  <!-- Drag-Geist -->
+  <div class="drag-ghost hidden" id="drag-ghost"></div>
+
+  <!-- Einstellungen -->
+  <div class="modal-scrim hidden" id="settings">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Einstellungen</h2>
+        <button class="icon-btn" data-close aria-label="Schließen">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <section>
+          <h3>Darstellung</h3>
+          <label class="row">Schriftgröße Bibel
+            <input type="range" id="set-bible-size" min="14" max="30" step="1" />
+            <output id="out-bible-size"></output>
+          </label>
+          <label class="row">Schriftgröße Notizen
+            <input type="range" id="set-note-size" min="13" max="26" step="1" />
+            <output id="out-note-size"></output>
+          </label>
+          <label class="row">Bibeltext
+            <select id="set-layout" class="tool-select">
+              <option value="lines">Jeder Vers in neuer Zeile</option>
+              <option value="flow">Fließtext</option>
+            </select>
+          </label>
+          <label class="row">Schriftart Bibel
+            <select id="set-font" class="tool-select">
+              <option value="serif">Serifen (Buchschrift)</option>
+              <option value="sans">Serifenlos</option>
+            </select>
+          </label>
+        </section>
+        <section>
+          <h3>Übersetzungen</h3>
+          <div id="trans-list" class="trans-list"></div>
+          <p class="hint">
+            Eigene Bibel importieren (z.&nbsp;B. Schlachter 2000, falls du sie digital besitzt):
+            unterstützt werden <b>Zefania-XML</b> und <b>JSON</b>. Die Datei bleibt nur auf diesem Gerät.
+          </p>
+          <label class="btn" for="import-bible">Bibel-Datei importieren …</label>
+          <input type="file" id="import-bible" accept=".xml,.json,application/json,text/xml" hidden />
+        </section>
+        <section>
+          <h3>Sicherung</h3>
+          <p class="hint">Deine Notizen sind nur in diesem Browser gespeichert. Mach ab und zu eine Sicherung.</p>
+          <div class="row-btns">
+            <button class="btn" id="export-backup">Sicherung herunterladen</button>
+            <label class="btn" for="import-backup">Sicherung einspielen …</label>
+            <input type="file" id="import-backup" accept=".json,application/json" hidden />
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
