@@ -207,6 +207,8 @@
           <div class="note-page" id="note-page">
             <input id="note-title" class="note-title" placeholder="Titel der Notiz" autocomplete="off" />
             <div class="note-meta" id="note-meta"></div>
+            <div class="note-tags" id="note-tags"></div>
+            <input id="note-summary" class="note-summary" placeholder="Kurzbeschreibung" autocomplete="off" maxlength="140" />
             <div id="editor" class="editor" contenteditable="true" spellcheck="true"
                  data-placeholder="Schreib los … oder markiere eine Bibelstelle und zieh sie hierher."></div>
             <div class="drop-hint" id="drop-hint">Hier ablegen</div>
@@ -265,7 +267,7 @@
           <button class="icon-btn" id="nav-fwd" title="Wieder vorwärts" aria-label="Vorwärts">
             <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
-          <div class="ref-group">
+          <div class="ref-nav">
             <button class="ref-step" id="ch-prev-top" title="Vorheriges Kapitel" aria-label="Vorheriges Kapitel">
               <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
             </button>
@@ -329,6 +331,13 @@
         <div class="search-results" id="search-results"></div>
       </div>
     </section>
+
+    <!-- Themen einer Notiz auswählen -->
+    <div class="tag-pop hidden" id="tag-pop">
+      <input id="tag-input" placeholder="Neues Thema, z. B. Bibelkreis" autocomplete="off" maxlength="40" />
+      <div class="tag-pop-list" id="tag-pop-list"></div>
+      <p class="tag-pop-hint">Tippen = Thema an/aus · Farbpunkt = Farbe wechseln</p>
+    </div>
 
     <!-- Im Vollbild: zur anderen Seite wechseln -->
     <div class="focus-bar hidden" id="focus-bar">

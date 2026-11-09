@@ -425,12 +425,12 @@ body.inking .bible-pane, body.inking .sel-menu { pointer-events: none; }
 .ref-btn svg { width: 16px; height: 16px; color: var(--text-3); }
 .ref-btn:hover { background: var(--bg-3); }
 /* Kapitel vor/zurück direkt neben der Stellenangabe (immer sichtbar, kompakt) */
-.ref-group {
+.ref-nav {
   display: inline-flex; align-items: stretch; height: 38px; margin-left: 4px; min-width: 0;
   border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-2); overflow: hidden;
 }
-.ref-group .ref-btn { border: 0; border-radius: 0; height: 100%; margin: 0; padding: 0 8px; background: transparent; min-width: 0; }
-.ref-group .ref-btn:hover { background: var(--bg-3); }
+.ref-nav .ref-btn { border: 0; border-radius: 0; height: 100%; margin: 0; padding: 0 8px; background: transparent; min-width: 0; }
+.ref-nav .ref-btn:hover { background: var(--bg-3); }
 .ref-step {
   flex: none; width: 32px; display: flex; align-items: center; justify-content: center;
   border: 0; background: transparent; color: var(--text-2);
@@ -829,13 +829,60 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 
 /* Bibel-Kopfzeile bei schmaler Spalte: Stellenangabe samt Pfeilen behält Vorrang */
 .bible-pane { container-type: inline-size; container-name: bible; }
-.ref-group .ref-btn { min-width: 96px; }
+.ref-nav .ref-btn { min-width: 96px; }
 .bible-pane .trans-select { min-width: 64px; flex-shrink: 1; }
 @container bible (max-width: 480px) {
   .bible-pane .head-row { gap: 0; padding-left: 4px; padding-right: 4px; }
   .bible-pane #nav-fwd, .bible-pane .theme-btn { display: none; } /* Hell/Dunkel gibt es auch bei den Notizen */
   .bible-pane .head-row .icon-btn { width: 34px; }
   .ref-step { width: 28px; }
-  .ref-group .ref-btn { padding: 0 6px; font-size: 14px; }
-  .ref-group .ref-btn svg { display: none; }
+  .ref-nav .ref-btn { padding: 0 6px; font-size: 14px; }
+  .ref-nav .ref-btn svg { display: none; }
 }
+
+/* ================= Themen & Kurzbeschreibung ================= */
+.note-tags, .note-summary { position: relative; z-index: 4; } /* auch im Stift-Modus antippbar */
+.note-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -6px 0 6px; }
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 2px; height: 26px; padding: 0 2px 0 10px; border-radius: 13px;
+  font-size: 13px; font-weight: 600; color: var(--tc);
+  background: color-mix(in srgb, var(--tc) 14%, transparent); border: 1px solid color-mix(in srgb, var(--tc) 40%, transparent);
+}
+.tag-chip button { width: 22px; height: 22px; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: 11px; opacity: .6; }
+.tag-chip button:hover { opacity: 1; background: color-mix(in srgb, var(--tc) 20%, transparent); }
+.tag-add {
+  height: 26px; padding: 0 10px; border-radius: 13px; font-size: 13px;
+  border: 1px dashed var(--line-2); background: transparent; color: var(--text-3);
+}
+.tag-add:hover { color: var(--accent); border-color: var(--accent); }
+.note-summary {
+  display: block; width: 100%; margin: 0 0 14px; padding: 4px 0; border: 0; outline: 0; background: transparent;
+  font-size: 14px; color: var(--text-2); border-bottom: 1px solid transparent;
+}
+.note-summary::placeholder { color: var(--text-3); font-style: italic; opacity: .8; }
+.note-summary:focus { border-bottom-color: var(--line-2); }
+.tag-pop {
+  position: fixed; z-index: 70; width: 280px; padding: 10px; border-radius: 14px;
+  background: var(--bg-2); border: 1px solid var(--line-2); box-shadow: 0 18px 50px rgba(0,0,0,calc(.7 * var(--shadow-k)));
+}
+.tag-pop.hidden { display: none; }
+.tag-pop input {
+  width: 100%; height: 38px; padding: 0 12px; border-radius: 9px; outline: 0;
+  border: 1px solid var(--line-2); background: var(--bg-1); color: var(--text); font-size: 15px;
+}
+.tag-pop-list { max-height: 220px; overflow-y: auto; margin-top: 6px; }
+.tag-row { display: flex; align-items: center; gap: 10px; padding: 6px 6px; border-radius: 8px; cursor: pointer; font-size: 15px; }
+.tag-row:hover { background: var(--bg-3); }
+.tag-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-row b { color: var(--accent); width: 16px; text-align: center; }
+.tag-row.on span { font-weight: 600; }
+.tag-dot { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--bg-2); outline: 1px solid var(--line-2); }
+.tag-empty, .tag-pop-hint { padding: 8px 6px 2px; font-size: 12px; color: var(--text-3); margin: 0; }
+.tag-labels { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
+.tag-label {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; color: var(--tc); background: color-mix(in srgb, var(--tc) 15%, transparent);
+}
+.note-item p.auto { font-style: italic; }
+.filter-hint { font-size: 12px; color: var(--text-3); padding: 4px 2px; white-space: normal; }
+.tag-pop-list:has(.tag-empty) + .tag-pop-hint { display: none; }

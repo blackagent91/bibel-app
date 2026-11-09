@@ -3,8 +3,8 @@ import { db, uid } from './db.js';
 import { BOOKS, getBook, formatRef, compareRefs } from './books.js';
 import { loadImported, listTranslations, getTranslation, importBibleFile, deleteImported } from './translations.js';
 import { BibleView } from './bible.js';
-import { NotesEditor, unpackStrokes, titleFromRefs } from './notes.js';
-import { $, $$, esc, toast, formatDate, dayKey, dayLabel } from './util.js';
+import { NotesEditor, unpackStrokes, titleFromRefs, autoSummary } from './notes.js';
+import { $, $$, esc, toast, formatDate, dayKey, dayLabel, COLORS } from './util.js';
 
 // ---------------------------------------------------------------------------
 // Zustand
@@ -16,6 +16,7 @@ const state = {
   drawerTab: 'notes',
   dayFilter: null, // "2026-11-08" oder null = alle Tage
   bookFilter: null, // Buch-ID oder null = alle Bücher
+  tagFilter: null, // Thema oder null = alle Themen
   filterMode: 'day', // welche Filterleiste gerade sichtbar ist
   focus: null, // Vollbild: 'notes' | 'bible' | null (geteilt)
 };
@@ -25,7 +26,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '50 · 08.11.2026';
+export const APP_VERSION = '51 · 09.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -44,7 +45,99 @@ function writeLS(key, value) {
 }
 const saveSettings = () => writeLS('settings', settings);
 
-const isEmpty = (n) => !n.title && !n.text && !(n.ink?.meta?.length || n.strokes?.length) && !(n.refs && n.refs.length);
+const isEmpty = (n) =>
+  !n.title && !n.text && !(n.ink?.meta?.length || n.strokes?.length) && !(n.refs && n.refs.length) && !(n.tags && n.tags.length) && !n.summary;
+
+// ---------------------------------------------------------------------------
+// Themen (Etiketten für Notizen, z. B. „Bibelkreis“)
+// ---------------------------------------------------------------------------
+const tagColors = readLS('tagColors', {}); // Thema -> Farb-ID
+
+function tagColor(name) {
+  if (!tagColors[name]) {
+    const used = Object.keys(tagColors).length;
+    tagColors[name] = COLORS[used % COLORS.length].id;
+    writeLS('tagColors', tagColors);
+  }
+  return tagColors[name];
+}
+
+function cycleTagColor(name) {
+  const i = COLORS.findIndex((c) => c.id === tagColor(name));
+  tagColors[name] = COLORS[(i + 1) % COLORS.length].id;
+  writeLS('tagColors', tagColors);
+}
+
+const tagLabel = (name, extra = '') =>
+  `<span class="tag-label" style="--tc:var(--c-${tagColor(name)})"${extra}>${esc(name)}</span>`;
+
+/** Alle Themen mit Anzahl der Notizen, häufigste zuerst */
+function allTags() {
+  const m = new Map();
+  for (const n of state.notes.values()) for (const t of n.tags || []) m.set(t, (m.get(t) || 0) + 1);
+  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de'));
+}
+
+/** Themen und Kurzbeschreibung der geöffneten Notiz im Kopf der Notiz anzeigen */
+function renderNoteHeader() {
+  const n = state.current;
+  const box = $('#note-tags');
+  if (!box) return;
+  const tags = n?.tags || [];
+  box.innerHTML =
+    tags.map((t) => `<span class="tag-chip" style="--tc:var(--c-${tagColor(t)})">${esc(t)}<button data-untag="${esc(t)}" aria-label="Thema entfernen">✕</button></span>`).join('') +
+    `<button class="tag-add" id="tag-add">${tags.length ? '+' : '+ Thema'}</button>`;
+  const sum = $('#note-summary');
+  if (document.activeElement !== sum) sum.value = n?.summary || '';
+  const auto = n ? autoSummary(n) : '';
+  sum.placeholder = auto ? `Kurzbeschreibung – automatisch: ${auto}` : 'Kurzbeschreibung (optional)';
+}
+
+function setNoteTags(tags) {
+  const n = state.current;
+  if (!n) return;
+  n.tags = [...new Set(tags)];
+  if (!n.tags.length) delete n.tags;
+  editor.changed();
+  renderNoteHeader();
+  renderTagPop();
+}
+
+function openTagPop(anchor) {
+  const pop = $('#tag-pop');
+  pop.classList.remove('hidden');
+  const r = anchor.getBoundingClientRect();
+  const w = 280;
+  pop.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left))}px`;
+  pop.style.top = `${Math.min(window.innerHeight - 260, r.bottom + 6)}px`;
+  $('#tag-input').value = '';
+  renderTagPop();
+  if (matchMedia('(pointer: fine)').matches) $('#tag-input').focus();
+}
+
+function closeTagPop() {
+  $('#tag-pop').classList.add('hidden');
+  $('#tag-input').blur();
+}
+
+function renderTagPop() {
+  const pop = $('#tag-pop');
+  if (pop.classList.contains('hidden')) return;
+  const on = new Set(state.current?.tags || []);
+  const q = $('#tag-input').value.trim().toLowerCase();
+  const tags = allTags().map(([t]) => t);
+  for (const t of on) if (!tags.includes(t)) tags.push(t);
+  const list = tags.filter((t) => !q || t.toLowerCase().includes(q));
+  $('#tag-pop-list').innerHTML = list.length
+    ? list
+        .map(
+          (t) => `<div class="tag-row${on.has(t) ? ' on' : ''}" data-toggle-tag="${esc(t)}">
+            <button class="tag-dot" data-cycle="${esc(t)}" style="background:var(--c-${tagColor(t)})" aria-label="Farbe wechseln"></button>
+            <span>${esc(t)}</span><b>${on.has(t) ? '✓' : ''}</b></div>`
+        )
+        .join('')
+    : `<div class="tag-empty">${q ? 'Mit Enter als neues Thema anlegen' : 'Noch keine Themen – oben eintippen und Enter'}</div>`;
+}
 
 function newNote(title = '') {
   const now = Date.now();
@@ -121,6 +214,7 @@ async function persistNote(n) {
   }
   writeLS('lastNote', n.id);
   if (refsChanged) bible.applyMarks();
+  if (n === state.current) renderNoteHeader();
   renderDrawer();
 }
 
@@ -301,26 +395,36 @@ function renderFilters() {
   // Zählen: Tage und Bücher (jeweils unter Berücksichtigung des anderen Filters)
   const dayCounts = new Map();
   const bookCounts = new Map();
+  const tagCounts = new Map();
   const inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+  const tagOk = (n) => !state.tagFilter || (n?.tags || []).includes(state.tagFilter);
   if (notesTab) {
     for (const n of state.notes.values()) {
       const books = new Set((n.refs || []).map((r) => r.book));
-      if (!state.bookFilter || books.has(state.bookFilter)) for (const d of noteDays(n)) inc(dayCounts, d);
-      if (!state.dayFilter || noteDays(n).includes(state.dayFilter)) for (const b of books) inc(bookCounts, b);
+      const bookOk = !state.bookFilter || books.has(state.bookFilter);
+      const dayOk = !state.dayFilter || noteDays(n).includes(state.dayFilter);
+      if (bookOk && tagOk(n)) for (const d of noteDays(n)) inc(dayCounts, d);
+      if (dayOk && tagOk(n)) for (const b of books) inc(bookCounts, b);
+      if (dayOk && bookOk) for (const t of n.tags || []) inc(tagCounts, t);
     }
   } else {
     const all = [];
-    for (const n of state.notes.values()) for (const r of n.refs || []) all.push({ book: r.book, day: refDay(r, n) });
-    for (const m of state.marks) all.push({ book: m.book, day: refDay(m) });
+    for (const n of state.notes.values()) for (const r of n.refs || []) all.push({ book: r.book, day: refDay(r, n), n });
+    for (const m of state.marks) all.push({ book: m.book, day: refDay(m), n: null });
     for (const r of all) {
-      if (!state.bookFilter || r.book === state.bookFilter) inc(dayCounts, r.day);
-      if (!state.dayFilter || r.day === state.dayFilter) inc(bookCounts, r.book);
+      const bookOk = !state.bookFilter || r.book === state.bookFilter;
+      const dayOk = !state.dayFilter || r.day === state.dayFilter;
+      const tOk = !state.tagFilter || (r.n && tagOk(r.n));
+      if (bookOk && tOk) inc(dayCounts, r.day);
+      if (dayOk && tOk) inc(bookCounts, r.book);
+      if (dayOk && bookOk && r.n) for (const t of r.n.tags || []) inc(tagCounts, t);
     }
   }
   const days = [...dayCounts.keys()].sort().reverse();
   const books = [...bookCounts.keys()].sort((x, y) => x - y);
+  const tags = [...tagCounts.keys()].sort((a, b) => tagCounts.get(b) - tagCounts.get(a) || a.localeCompare(b, 'de'));
   const bar = $('#day-filter');
-  if (days.length < 2 && !books.length && !state.dayFilter && !state.bookFilter) {
+  if (days.length < 2 && !books.length && !tags.length && !state.dayFilter && !state.bookFilter && !state.tagFilter) {
     bar.innerHTML = '';
     bar.classList.add('hidden');
     return;
@@ -330,20 +434,45 @@ function renderFilters() {
   const seg = `<div class="seg">
       <button class="${mode === 'day' ? 'active' : ''}" data-mode="day">Tage</button>
       <button class="${mode === 'book' ? 'active' : ''}" data-mode="book">Bücher</button>
+      <button class="${mode === 'tag' ? 'active' : ''}" data-mode="tag">Themen</button>
     </div>`;
   const chip = (attr, key, active, label, n) =>
     `<button class="chip${active ? ' active' : ''}" data-${attr}="${key ?? ''}">${esc(label)}${n != null ? ` <em>${n}</em>` : ''}</button>`;
   // aktiver Filter der anderen Art als entfernbares Kärtchen
   let other = '';
-  if (mode === 'book' && state.dayFilter) other = `<button class="chip active" data-clear="day">${esc(dayLabel(state.dayFilter))} ✕</button>`;
-  if (mode === 'day' && state.bookFilter) other = `<button class="chip active" data-clear="book">${esc(getBook(state.bookFilter).name)} ✕</button>`;
+  if (mode !== 'day' && state.dayFilter) other += `<button class="chip active" data-clear="day">${esc(dayLabel(state.dayFilter))} ✕</button>`;
+  if (mode !== 'book' && state.bookFilter) other += `<button class="chip active" data-clear="book">${esc(getBook(state.bookFilter).name)} ✕</button>`;
+  if (mode !== 'tag' && state.tagFilter) other += `<button class="chip active" data-clear="tag">${esc(state.tagFilter)} ✕</button>`;
+  const tagChip = (t) =>
+    `<button class="chip tag${state.tagFilter === t ? ' active' : ''}" data-tag="${esc(t)}"><i style="background:var(--c-${tagColor(t)})"></i>${esc(t)} <em>${tagCounts.get(t)}</em></button>`;
   const chips =
     mode === 'day'
       ? chip('day', '', !state.dayFilter, 'Alle Tage') + days.map((d) => chip('day', d, state.dayFilter === d, dayLabel(d), dayCounts.get(d))).join('')
-      : chip('book', '', !state.bookFilter, 'Alle Bücher') +
-        books.map((b) => chip('book', b, state.bookFilter === b, getBook(b).name, bookCounts.get(b))).join('');
+      : mode === 'book'
+        ? chip('book', '', !state.bookFilter, 'Alle Bücher') +
+          books.map((b) => chip('book', b, state.bookFilter === b, getBook(b).name, bookCounts.get(b))).join('')
+        : chip('tag', '', !state.tagFilter, 'Alle Themen') +
+          (tags.length ? tags.map(tagChip).join('') : '<span class="filter-hint">Noch keine Themen – in einer Notiz unter der Überschrift „+ Thema“ antippen.</span>');
   bar.innerHTML = seg + other + chips;
 }
+
+/** Notizen mit den aktiven Filtern (Tag, Buch, Thema, Suche) – in der Reihenfolge des Verzeichnisses */
+function filteredNotes() {
+  const q = $('#drawer-search').value.trim().toLowerCase();
+  const notes = sortedNotes().filter((n) => {
+    if (state.dayFilter && !noteDays(n).includes(state.dayFilter)) return false;
+    if (state.bookFilter && !(n.refs || []).some((r) => r.book === state.bookFilter)) return false;
+    if (state.tagFilter && !(n.tags || []).includes(state.tagFilter)) return false;
+    if (!q) return true;
+    const hay = `${n.title} ${n.text} ${n.summary || ''} ${(n.tags || []).join(' ')} ${(n.refs || []).map((r) => formatRef(r) + ' ' + formatRef(r, true)).join(' ')}`.toLowerCase();
+    return hay.includes(q);
+  });
+  // Buchfilter: zum Durchgehen in Bibelreihenfolge statt nach Datum
+  if (state.bookFilter) notes.sort((x, y) => compareRefs(firstRefIn(x, state.bookFilter), firstRefIn(y, state.bookFilter)));
+  return notes;
+}
+
+const anyFilter = () => !!(state.dayFilter || state.bookFilter || state.tagFilter || $('#drawer-search').value.trim());
 
 function renderDrawer() {
   updateFocusCount();
@@ -352,19 +481,11 @@ function renderDrawer() {
   const q = $('#drawer-search').value.trim().toLowerCase();
   const list = $('#drawer-list');
   if (state.drawerTab === 'notes') {
-    const notes = sortedNotes().filter((n) => {
-      if (state.dayFilter && !noteDays(n).includes(state.dayFilter)) return false;
-      if (state.bookFilter && !(n.refs || []).some((r) => r.book === state.bookFilter)) return false;
-      if (!q) return true;
-      const hay = `${n.title} ${n.text} ${(n.refs || []).map((r) => formatRef(r) + ' ' + formatRef(r, true)).join(' ')}`.toLowerCase();
-      return hay.includes(q);
-    });
+    const notes = filteredNotes();
     if (!notes.length) {
-      list.innerHTML = `<div class="empty">${q || state.dayFilter || state.bookFilter ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
+      list.innerHTML = `<div class="empty">${anyFilter() ? 'Keine Notiz gefunden.' : 'Noch keine Notizen.<br>Markiere eine Bibelstelle und tippe auf „Notiz erstellen“.'}</div>`;
       return;
     }
-    // Buchfilter: zum Durchgehen in Bibelreihenfolge statt nach Datum
-    if (state.bookFilter) notes.sort((x, y) => compareRefs(firstRefIn(x, state.bookFilter), firstRefIn(y, state.bookFilter)));
     let lastDay = null;
     let lastChapter = null;
     list.innerHTML = notes
@@ -385,10 +506,13 @@ function renderDrawer() {
         const refs = (n.refs || [])
           .map((r, i) => `<button class="chip" data-note="${n.id}" data-ref-idx="${i}"><i style="background:var(--c-${r.color || 'yellow'})"></i>${esc(formatRef(r, true))}</button>`)
           .join('');
+        const tags = (n.tags || []).map((t) => tagLabel(t)).join('');
+        const summary = n.summary || autoSummary(n);
         return `${head}<div class="note-item${state.current?.id === n.id ? ' active' : ''}" data-open="${n.id}">
           <h4>${esc(n.title || 'Unbenannte Notiz')}</h4>
+          ${tags ? `<div class="tag-labels">${tags}</div>` : ''}
+          ${summary ? `<p${n.summary ? '' : ' class="auto"'}>${esc(summary)}</p>` : ''}
           ${refs ? `<div class="chips">${refs}</div>` : ''}
-          ${n.text ? `<p>${esc(n.text.slice(0, 160))}</p>` : ''}
           <time>${formatDate(n.updated)}</time>
           <button class="icon-btn del" data-del="${n.id}" title="Löschen" aria-label="Löschen"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button>
         </div>`;
@@ -402,10 +526,11 @@ function renderDrawer() {
     const filtered = items
       .filter((r) => !state.dayFilter || r.day === state.dayFilter)
       .filter((r) => !state.bookFilter || r.book === state.bookFilter)
+      .filter((r) => !state.tagFilter || (r.noteId && (state.notes.get(r.noteId)?.tags || []).includes(state.tagFilter)))
       .filter((r) => !q || `${formatRef(r)} ${formatRef(r, true)} ${r.label}`.toLowerCase().includes(q))
       .sort(compareRefs);
     if (!filtered.length) {
-      list.innerHTML = `<div class="empty">${q || state.dayFilter || state.bookFilter ? 'Nichts gefunden.' : 'Noch keine markierten Bibelstellen.'}</div>`;
+      list.innerHTML = `<div class="empty">${anyFilter() ? 'Nichts gefunden.' : 'Noch keine markierten Bibelstellen.'}</div>`;
       return;
     }
     let html = '';
@@ -443,6 +568,8 @@ function bindDrawer() {
     else if ('book' in t.dataset) state.bookFilter = t.dataset.book ? +t.dataset.book : null;
     else if (t.dataset.clear === 'day') state.dayFilter = null;
     else if (t.dataset.clear === 'book') state.bookFilter = null;
+    else if ('tag' in t.dataset) state.tagFilter = t.dataset.tag || null;
+    else if (t.dataset.clear === 'tag') state.tagFilter = null;
     renderDrawer();
     $('#drawer-list').scrollTop = 0;
   });
@@ -538,6 +665,7 @@ function bindLayout() {
   $('#focus-switch').onclick = () => setFocus(state.focus === 'notes' ? 'bible' : 'notes');
   $('#focus-prev').onclick = () => stepNote(-1);
   $$('.theme-btn').forEach((b) => (b.onclick = toggleTheme));
+  bindTags();
   $('#focus-next').onclick = () => stepNote(1);
   window.matchMedia('(max-width: 760px)').addEventListener?.('change', () => state.focus && setFocus(null));
 
@@ -621,18 +749,19 @@ function updateFocusCount() {
   const el = $('#focus-count');
   if (!el) return;
   if (state.focus !== 'notes') return (el.textContent = '');
-  const list = sortedNotes();
+  const list = filteredNotes();
   const i = list.findIndex((n) => n.id === state.current?.id);
-  el.textContent = list.length > 1 || i < 0 ? `${i < 0 ? '–' : i + 1} / ${list.length}` : '';
+  const what = state.tagFilter ? ` · ${state.tagFilter}` : anyFilter() ? ' · gefiltert' : '';
+  el.textContent = list.length > 1 || i < 0 || what ? `${i < 0 ? '–' : i + 1} / ${list.length}${what}` : '';
 }
 
 /** Im Notizen-Vollbild durch die Notizen blättern (Reihenfolge wie im Verzeichnis, am Ende wieder von vorn) */
 function stepNote(dir) {
   editor.save.flush();
-  const list = sortedNotes();
-  if (!list.length) return toast('Noch keine Notizen');
+  const list = filteredNotes();
+  if (!list.length) return toast(anyFilter() ? 'Keine Notiz passt zum Filter' : 'Noch keine Notizen');
   const i = list.findIndex((n) => n.id === state.current?.id);
-  if (i >= 0 && list.length === 1) return toast('Das ist die einzige Notiz');
+  if (i >= 0 && list.length === 1) return toast(anyFilter() ? 'Die einzige Notiz in diesem Filter' : 'Das ist die einzige Notiz');
   const next = i < 0 ? (dir > 0 ? 0 : list.length - 1) : (i + dir + list.length) % list.length;
   openNote(list[next].id);
   updateFocusCount();
@@ -651,6 +780,67 @@ function toggleSwap() {
   }, 120);
   saveSettings();
   toast(settings.swap === '1' ? 'Notizen rechts · Bibel links' : 'Notizen links · Bibel rechts', 1600);
+}
+
+function bindTags() {
+  $('#note-tags').addEventListener('click', (e) => {
+    const un = e.target.closest('[data-untag]');
+    if (un) return setNoteTags((state.current?.tags || []).filter((t) => t !== un.dataset.untag));
+    const add = e.target.closest('#tag-add');
+    if (add) {
+      e.stopPropagation();
+      if ($('#tag-pop').classList.contains('hidden')) openTagPop(add);
+      else closeTagPop();
+    }
+  });
+  $('#tag-input').addEventListener('input', renderTagPop);
+  $('#tag-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') return closeTagPop();
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const v = e.target.value.trim().replace(/\s+/g, ' ');
+    if (!v) return;
+    // vorhandenes Thema mit anderer Schreibweise wiederverwenden
+    const existing = allTags().map(([t]) => t).find((t) => t.toLowerCase() === v.toLowerCase());
+    const name = existing || v;
+    e.target.value = '';
+    setNoteTags([...(state.current?.tags || []), name]);
+    toast(`Thema „${name}“ hinzugefügt`, 1200);
+  });
+  $('#tag-pop-list').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dot = e.target.closest('[data-cycle]');
+    if (dot) {
+      cycleTagColor(dot.dataset.cycle);
+      renderTagPop();
+      renderNoteHeader();
+      renderDrawer();
+      return;
+    }
+    const row = e.target.closest('[data-toggle-tag]');
+    if (!row) return;
+    const t = row.dataset.toggleTag;
+    const cur = state.current?.tags || [];
+    setNoteTags(cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]);
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if ($('#tag-pop').classList.contains('hidden')) return;
+    if (e.target.closest('#tag-pop, #tag-add')) return;
+    closeTagPop();
+  }, true);
+  const sum = $('#note-summary');
+  sum.addEventListener('input', () => {
+    const n = state.current;
+    if (!n) return;
+    const v = sum.value.trim();
+    if (v) n.summary = v;
+    else delete n.summary;
+    editor.changed();
+  });
+  sum.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sum.blur();
+  });
+  sum.addEventListener('blur', renderNoteHeader);
 }
 
 /** Hell/Dunkel umschalten */
@@ -898,6 +1088,10 @@ const editor = new NotesEditor({
     if (isNarrow()) showPane('bible');
   },
   onDropScripture: (payload, x, y) => dropScripture(payload, x, y),
+  onLoad: () => {
+    closeTagPop();
+    renderNoteHeader();
+  },
 });
 
 const bible = new BibleView({

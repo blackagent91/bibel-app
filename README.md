@@ -24,6 +24,12 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 - Unten am Trennstrich sitzt ein Griff **⇄**: antippen oder zur Seite ziehen, dann tauschen
   Notizen und Bibel die Seiten (z. B. für Rechtshänder Notizen rechts). Auch in den Einstellungen unter „Anordnung“.
 
+**Themen & Kurzbeschreibung**
+- Unter der Überschrift einer Notiz: „+ Thema“ antippen und z. B. „Bibelkreis“ eintippen (Enter). Eine Notiz kann mehrere Themen haben; bereits benutzte Themen werden vorgeschlagen, der Farbpunkt wechselt die Farbe eines Themas.
+- Im Verzeichnis stehen die Themen als farbige Etiketten an jeder Notiz; der Filter „Themen“ (neben Tage/Bücher) zeigt nur die Notizen eines Themas – auch im Tab „Bibelstellen“.
+- Mit aktivem Themenfilter blättern die Pfeile im Notizen-Vollbild nur durch dieses Thema („2 / 5 · Bibelkreis“).
+- Kurzbeschreibung: Zeile unter den Themen. Leer gelassen, erstellt die App automatisch eine – den ersten Satz deines Textes, sonst den Anfang des ersten Bibeltextes, sonst „Handschriftliche Notiz“ (kursiv im Verzeichnis).
+
 **Hell / Dunkel**
 - Sonne-/Mond-Knopf oben (Notizen und Bibel) schaltet zwischen dunklem und hellem Modus um; die Wahl bleibt gespeichert. Weiße Stiftfarbe und weiße Schrift erscheinen im hellen Modus dunkel.
 

@@ -48,8 +48,9 @@ export function scriptureHTML(p, color = 'yellow') {
 }
 
 export class NotesEditor {
-  constructor({ onSave, onJump, onDropScripture }) {
+  constructor({ onSave, onJump, onDropScripture, onLoad }) {
     this.onSave = onSave;
+    this.onLoad = onLoad;
     this.onJump = onJump;
     this.onDropScripture = onDropScripture;
     this.note = null;
@@ -162,6 +163,7 @@ export class NotesEditor {
     this.hideHandle();
     this.el.scroll.scrollTop = 0;
     this.el.saveState.textContent = '';
+    this.onLoad?.(note);
   }
 
   /** Bibelstellen aus den Blöcken der Notiz lesen */
@@ -2224,6 +2226,28 @@ function snapToPaper(kind, poly, paper) {
   let x0 = sx(Math.min(...xs)), x1 = sx(Math.max(...xs)), y0 = sy(Math.min(...ys)), y1 = sy(Math.max(...ys));
   if (x0 === x1 || y0 === y1) return null;
   return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+}
+
+/**
+ * Kurzbeschreibung automatisch: erster Satz des eigenen Textes, sonst der Anfang
+ * des ersten Bibeltextes, sonst ein Hinweis auf die Handschrift.
+ */
+export function autoSummary(n) {
+  const cut = (s, max = 110) => (s.length > max ? s.slice(0, max).replace(/\s+\S*$/, '') + ' …' : s);
+  const text = (n.text || '').trim();
+  if (text) {
+    const m = text.match(/^.+?[.!?](?=\s|$)/);
+    return cut(m ? m[0] : text);
+  }
+  const hasInk = !!(n.ink?.meta?.length || n.strokes?.length);
+  if (n.html && n.html.includes('scripture-text')) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = n.html;
+    const t = tpl.content.querySelector('.scripture-text');
+    const v = t ? t.textContent.replace(/^\s*\d+\s*/, '').replace(/\s+/g, ' ').trim() : '';
+    if (v) return (hasInk ? '✎ ' : '') + '„' + cut(v, 90) + '“';
+  }
+  return hasInk ? '✎ Handschriftliche Notiz' : '';
 }
 
 /** Überschrift aus den Bibelstellen einer Notiz, z. B. „Johannes 3,16.18; Römer 8,28“ */
