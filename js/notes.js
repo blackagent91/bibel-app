@@ -1166,6 +1166,14 @@ class Ink {
     try {
       if (localStorage.getItem('pencilOnly') === '1') this.setPencilOnly(true);
     } catch {}
+    // Glätten: standardmäßig an
+    let sm = true;
+    try { sm = localStorage.getItem('smoothInk') !== '0'; } catch {}
+    this.setSmooth(sm);
+    $('#smooth-ink').onclick = () => {
+      this.setSmooth(!this.smooth);
+      toast(this.smooth ? 'Glätten an – neue Striche werden geglättet' : 'Glätten aus – Striche bleiben wie gezeichnet', 1600);
+    };
     $('#draw-clear').onclick = () => {
       if (!this.strokes.length) return;
       if (!confirm('Alle Zeichnungen dieser Notiz löschen?')) return;
@@ -1512,6 +1520,8 @@ class Ink {
         this.changed(); // ganze Zeichnung neu (Teile wurden gelöscht)
         return;
       }
+      // Handschrift glätten (kleines Zittern raus, Buchstabenform bleibt)
+      if (this.smooth && cur.s.t === 'pen' && !cur.snapped) cur.s.p = smoothStroke(cur.s.p);
       // Linie verlängern: liegt sie auf derselben Spur wie eine vorhandene Linie und schließt an, verbinden
       if (cur.s.k === 'line' && this.mergeLine(cur.s)) {
         this.changed();
@@ -1539,6 +1549,12 @@ class Ink {
     c.addEventListener('wheel', (e) => {
       this.ed.el.scroll.scrollTop += e.deltaY;
     }, { passive: true });
+  }
+
+  setSmooth(on) {
+    this.smooth = on;
+    $('#smooth-ink').classList.toggle('active', on);
+    try { localStorage.setItem('smoothInk', on ? '1' : '0'); } catch {}
   }
 
   setPencilOnly(on) {
@@ -2244,6 +2260,42 @@ function snapToPaper(kind, poly, paper) {
   let x0 = sx(Math.min(...xs)), x1 = sx(Math.max(...xs)), y0 = sy(Math.min(...ys)), y1 = sy(Math.max(...ys));
   if (x0 === x1 || y0 === y1) return null;
   return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+}
+
+/**
+ * Strich glätten: jeder Punkt wird mit seinen Nachbarn entlang der Strichlänge gemittelt
+ * (Gauß, ca. 2 px). Unabhängig davon, wie dicht der Pencil Punkte liefert; Anfang und Ende bleiben
+ * exakt, zu den Enden hin wird schwächer geglättet, damit nichts kürzer wird.
+ */
+const SMOOTH_SIGMA = 2;
+function smoothStroke(p) {
+  const n = p.length / 3;
+  if (n < 4) return p;
+  const s = new Float64Array(n);
+  for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(p[i * 3] - p[i * 3 - 3], p[i * 3 + 1] - p[i * 3 - 2]);
+  const L = s[n - 1];
+  if (L < 3) return p;
+  const out = p.slice();
+  let lo = 0;
+  for (let i = 1; i < n - 1; i++) {
+    const sig = Math.min(SMOOTH_SIGMA, s[i] / 2, (L - s[i]) / 2);
+    if (sig < 0.15) continue;
+    const reach = sig * 3;
+    while (s[lo] < s[i] - reach) lo++;
+    let wx = 0, wy = 0, wp = 0, ws = 0;
+    for (let j = lo; j < n && s[j] <= s[i] + reach; j++) {
+      const d = s[j] - s[i];
+      const w = Math.exp(-(d * d) / (2 * sig * sig));
+      wx += p[j * 3] * w;
+      wy += p[j * 3 + 1] * w;
+      wp += p[j * 3 + 2] * w;
+      ws += w;
+    }
+    out[i * 3] = Math.round((wx / ws) * 10) / 10;
+    out[i * 3 + 1] = Math.round((wy / ws) * 10) / 10;
+    out[i * 3 + 2] = Math.round((wp / ws) * 100) / 100;
+  }
+  return out;
 }
 
 /**
