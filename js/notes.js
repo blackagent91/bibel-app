@@ -21,6 +21,7 @@ const BLOCK_COLORS = [
 ];
 const PEN_COLORS = ['#f2f2f2', '#e8c26e', '#6cd28c', '#6eaaff', '#ff78b4', '#aa82ff', '#ff6b6b', '#8a8a92'];
 const PEN_WIDTHS = [1.5, 2.5, 4, 7];
+const ERASER_RETURN_MS = 2000; // so lange nach dem letzten Radieren springt das Werkzeug zurück zum Stift
 const PALM_GRACE_MS = 900; // so lange nach dem Stift werden Berührungen der Hand ignoriert
 const MIN_VERTICAL_REVERSALS = 6; // ab 3 Bögen (Ab-Auf-Ab-Auf…) gilt Hoch-runter-Kritzeln als Löschen
 const MIN_HORIZONTAL_REVERSALS = 3;
@@ -1175,8 +1176,21 @@ class Ink {
   }
 
   setTool(t) {
+    clearTimeout(this.eraserTimer);
+    if (t !== 'eraser') this.lastDrawTool = t;
     this.tool = t;
     $$('[data-pen]').forEach((b) => b.classList.toggle('active', b.dataset.pen === t));
+  }
+
+  /** Nach dem Radieren: kurz nichts mehr radiert -> automatisch zurück zu Stift bzw. Textmarker */
+  scheduleEraserReturn() {
+    clearTimeout(this.eraserTimer);
+    this.eraserTimer = setTimeout(() => {
+      if (this.tool !== 'eraser' || this.current) return;
+      const back = this.lastDrawTool || 'pen';
+      this.setTool(back);
+      toast(back === 'marker' ? 'Zurück zum Textmarker' : 'Zurück zum Stift', 900);
+    }, ERASER_RETURN_MS);
   }
 
   pushUndo() {
@@ -1336,6 +1350,7 @@ class Ink {
       if (this.current) return;
       capture(c, e.pointerId);
       this.measure();
+      clearTimeout(this.eraserTimer); // Stift wieder aufgesetzt -> nicht mitten drin zurückspringen
       // Bibelstellen-Block unter dem Stift? Pfeil/Kopfzeile = antippen, Bibeltext = Wörter markieren
       const hit = this.ed.hitScripture(e.clientX, e.clientY);
       if (hit && hit.kind === 'grip') {
@@ -1355,6 +1370,7 @@ class Ink {
       }
       const [x, y] = this.toPage(e);
       if (this.tool === 'eraser') {
+        clearTimeout(this.eraserTimer); // radiert weiter -> noch nicht zurückspringen
         this.pushUndo();
         this.current = { eraser: true, pen: isPen, id: e.pointerId };
         this.erase(x, y);
@@ -1468,6 +1484,7 @@ class Ink {
       }
       if (cur.mark) {
         this.clearLive();
+        if (cur.remove && this.tool === 'eraser') this.scheduleEraserReturn();
         if (e.type !== 'pointerup') return;
         const tapped = !cur.moved && Math.abs(e.clientX - cur.x0) < 8 && Math.abs(e.clientY - cur.y0) < 8;
         if (tapped) {
@@ -1482,6 +1499,7 @@ class Ink {
       if (cur.eraser) {
         if (this.undoStack.length && this.undoStack[this.undoStack.length - 1].length === this.strokes.length) this.undoStack.pop();
         else this.ed.changed('ink');
+        this.scheduleEraserReturn();
         return;
       }
       clearTimeout(this.holdTimer);
