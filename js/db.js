@@ -5,9 +5,8 @@ const STORES = ['notes', 'marks', 'bibles', 'kv'];
 
 let dbPromise = null;
 
-function open() {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+function openOnce() {
+  return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -20,6 +19,27 @@ function open() {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+/**
+ * Datenbank öffnen. iOS lässt das Öffnen nach dem Aufwachen der App manchmal einfach hängen –
+ * dann nach kurzer Zeit erneut versuchen statt ewig zu warten.
+ */
+function open() {
+  if (dbPromise) return dbPromise;
+  const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms));
+  dbPromise = (async () => {
+    let last;
+    for (const ms of [2500, 4000, 8000]) {
+      try {
+        return await Promise.race([openOnce(), timeout(ms)]);
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last;
+  })();
+  dbPromise.catch(() => (dbPromise = null)); // beim nächsten Zugriff neu versuchen
   return dbPromise;
 }
 

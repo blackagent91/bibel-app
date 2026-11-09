@@ -72,6 +72,12 @@
   </script>
 </head>
 <body>
+  <!-- Startbildschirm: bleibt, bis die App wirklich bereit ist (oder ein Update fertig geladen hat) -->
+  <div id="splash" class="splash" aria-hidden="true">
+    <img src="icons/icon.svg" alt="" class="splash-logo" />
+    <div class="splash-bar"><i></i></div>
+    <p class="splash-msg" id="splash-msg"></p>
+  </div>
   <div id="app" class="app">
     <!-- ============ LINKS: NOTIZEN ============ -->
     <section id="notes-pane" class="pane notes-pane" aria-label="Notizen">

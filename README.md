@@ -30,6 +30,10 @@ Eine schlichte, dunkle Web-App zum Bibelstudium im Split-Screen:
 - Mit aktivem Themenfilter blättern die Pfeile im Notizen-Vollbild nur durch dieses Thema („2 / 5 · Bibelkreis“).
 - Kurzbeschreibung: Zeile unter den Themen. Leer gelassen, erstellt die App automatisch eine – den ersten Satz deines Textes, sonst den Anfang des ersten Bibeltextes, sonst „Handschriftliche Notiz“ (kursiv im Verzeichnis).
 
+**Start**
+- Beim Öffnen erscheint kurz das Logo mit einer kleinen Ladeanimation, bis die App wirklich bereit ist. Liegt eine neue Version bereit, steht dort „Neue Version wird geladen …“ und die App startet danach von selbst frisch – man tippt nie in eine halb geladene App.
+- Kehrt die App aus dem Hintergrund zurück, werden hängengebliebene Stift-Zustände aufgeräumt (sonst reagierten Stift und Finger nicht mehr); hängt das Öffnen des Speichers, versucht die App es automatisch erneut.
+
 **Hell / Dunkel**
 - Sonne-/Mond-Knopf oben (Notizen und Bibel) schaltet zwischen dunklem und hellem Modus um; die Wahl bleibt gespeichert. Weiße Stiftfarbe und weiße Schrift erscheinen im hellen Modus dunkel.
 

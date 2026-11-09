@@ -26,7 +26,7 @@ const noteDays = (n) => n.days || [...new Set([dayKey(n.created), dayKey(n.updat
 /** Tag, an dem eine Bibelstelle markiert/eingefügt wurde */
 const refDay = (r, n) => dayKey(r.added || r.created || n?.created || Date.now());
 
-export const APP_VERSION = '53 · 09.11.2026';
+export const APP_VERSION = '54 · 09.11.2026';
 const DEFAULTS = { bibleSize: 19, noteSize: 17, layout: 'lines', font: 'serif', trans: 'elb1905', split: 50, xrefs: 'on', swap: '0', headings: 'on' };
 const settings = { ...DEFAULTS, ...readLS('settings', {}) };
 
@@ -1113,6 +1113,27 @@ const bible = new BibleView({
   toast,
 });
 
+// ---------------------------------------------------------------------------
+// Startbildschirm
+// ---------------------------------------------------------------------------
+const splashStart = performance.now();
+let splashTimer = 0;
+function showSplash(msg = '') {
+  const s = $('#splash');
+  if (!s) return;
+  clearTimeout(splashTimer); // ein geplantes Ausblenden abbrechen
+  $('#splash-msg').textContent = msg;
+  s.classList.remove('out');
+}
+function hideSplash() {
+  const s = $('#splash');
+  if (!s) return;
+  // mindestens kurz zeigen, damit es nicht flackert
+  const wait = Math.max(0, 450 - (performance.now() - splashStart));
+  clearTimeout(splashTimer);
+  splashTimer = setTimeout(() => s.classList.add('out'), wait);
+}
+
 async function init() {
   bindLayout();
   bindDrawer();
@@ -1145,7 +1166,13 @@ async function init() {
   });
 
   window.__appReady = true; // Start geglückt – Notfall-Hinweis wird nicht gebraucht
+  // Zurück aus dem Hintergrund: hängengebliebene Stift-/Finger-Zustände zurücksetzen
+  const revive = () => editor.ink.resetStuck();
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && revive());
+  window.addEventListener('pageshow', revive);
+  window.addEventListener('focus', revive);
 
+  let updating = false;
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     // Wenn eine neue Version komplett installiert ist, einmal neu laden – so laufen nie zwei Versionen gemischt
     const hadController = !!navigator.serviceWorker.controller;
@@ -1156,16 +1183,34 @@ async function init() {
       editor.save.flush();
       location.reload();
     });
-    navigator.serviceWorker
+    const watchUpdate = (reg) => {
+      // Neue Version wird geladen: Startbildschirm zeigen, bis sie fertig ist und neu lädt
+      reg.addEventListener('updatefound', () => {
+        if (!hadController) return;
+        updating = true;
+        showSplash('Neue Version wird geladen …');
+        setTimeout(() => {
+          if (!reloading) {
+            updating = false;
+            hideSplash();
+          }
+        }, 15000); // Notfall: nicht ewig warten
+      });
+    };
+    const check = navigator.serviceWorker
       .register('sw.js', { updateViaCache: 'none' })
       .then((reg) => {
-        reg.update();
+        watchUpdate(reg);
         document.addEventListener('visibilitychange', () => {
           if (document.visibilityState === 'visible') reg.update().catch(() => {});
         });
+        return reg.update();
       })
       .catch(() => {});
+    // kurz auf die Update-Prüfung warten (offline/langsam: nicht länger als 2,5 s)
+    await Promise.race([check, new Promise((r) => setTimeout(r, 2500))]);
   }
+  if (!updating) hideSplash();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 }
 

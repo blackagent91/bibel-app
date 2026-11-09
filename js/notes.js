@@ -1243,6 +1243,31 @@ class Ink {
     return !!this.current?.pen || Date.now() - this.lastPen < PALM_GRACE_MS;
   }
 
+  /**
+   * Hängengebliebenen Zustand auflösen (z. B. App mitten im Strich in den Hintergrund geschickt,
+   * das „Stift abgehoben“ kam nie an). Sonst würde danach weder Stift noch Finger reagieren.
+   */
+  resetStuck() {
+    const cur = this.current;
+    if (cur) {
+      clearTimeout(this.moveTimer);
+      clearTimeout(this.holdTimer);
+      if (cur.move) this.endMove(cur);
+      else if (cur.s && !cur.eraser && cur.s.p.length > 3) {
+        this.strokes.push(cur.s); // angefangenen Strich behalten
+        this.ed.changed('ink');
+      }
+      this.current = null;
+    }
+    this.pan = null;
+    this.tpan = null;
+    this.lastPen = 0;
+    clearTimeout(this.inkingTimer);
+    document.body.classList.remove('inking');
+    this.clearLive();
+    this.schedule();
+  }
+
   /** Während mit dem Pencil geschrieben wird: keine Textauswahl/Kopieren-Menü (einmal pro Strich setzen) */
   startInking() {
     clearTimeout(this.inkingTimer);
@@ -1325,6 +1350,9 @@ class Ink {
     c.addEventListener('pointerdown', (e) => {
       if (this.ed.mode !== 'draw') return;
       e.preventDefault();
+      // alter Strich ohne „abgehoben“ (seit über 2 s keine Bewegung) -> aufräumen statt alles zu blockieren
+      if (this.current && Date.now() - (this.lastMoveT || 0) > 2000) this.resetStuck();
+      this.lastMoveT = Date.now();
       const isPen = e.pointerType === 'pen';
 
       if (isPen) {
@@ -1403,6 +1431,7 @@ class Ink {
     });
 
     c.addEventListener('pointermove', (e) => {
+      if (this.current && e.pointerId === this.current.id) this.lastMoveT = Date.now();
       if (this.pan && e.pointerId === this.pan.id) {
         if (this.penActive()) return (this.pan = null);
         if (!('ontouchstart' in window)) this.ed.el.scroll.scrollTop = this.pan.top - (e.clientY - this.pan.y); // ohne Touch-Ereignisse
